@@ -89,8 +89,18 @@ hooks/         the script install-hook copies into ~/.claude/hooks/
 Subagent transcripts (`<session-id>/subagents/*.jsonl`) are deliberately skipped — they're
 sidechains, not sessions.
 
+## Jump to tab
+
+The ⇥ button on a card (or **Jump to tab** in the drawer) focuses the terminal tab that
+session is running in. It matches on TTY, which comes from the hook registry or from `ps`,
+and drives iTerm2 via AppleScript with Terminal.app as a fallback.
+
+macOS may ask for Automation permission the first time. Sessions with no recorded TTY —
+background and daemon-spawned ones — don't show the button.
+
 ## Not built yet
 
-- Click a card to focus its iTerm tab (the TTY is already captured; needs AppleScript)
 - Ask a question about a session without interrupting it, via `claude -p --fork-session`
 - A manager agent coordinating across sessions
+
+No LLM calls anywhere in this app yet; everything above is deterministic parsing.

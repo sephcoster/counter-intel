@@ -2,6 +2,7 @@ import { db } from "./db.js";
 import { repoInfo, projectName } from "./git.js";
 import { liveProcesses, explicitSessionId, type LiveProc } from "./live.js";
 import { contextWindowFor } from "./parse.js";
+import { normalizeTty } from "./focus.js";
 import type { SessionDetail, SessionStatus, SessionSummary, SessionRef } from "../shared/types.js";
 
 const WORKING_EVENTS = new Set([
@@ -126,6 +127,7 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
     const info = repoInfo(cwd);
     const contextTokens = Number(row.context_tokens ?? 0);
     const model = (row.model as string | null) ?? null;
+    const tty = normalizeTty(proc?.tty ?? event?.tty ?? null);
     const contextWindow = contextWindowFor(model, contextTokens);
 
     return {
@@ -139,7 +141,10 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
       status,
       statusSource: source,
       pid: proc?.pid ?? event?.pid ?? null,
-      tty: proc?.tty ?? event?.tty ?? null,
+      tty,
+      // A dead session's tab may still be open, so focusing is offered whenever we
+      // know a tty — the AppleScript lookup is what actually decides.
+      canFocus: tty !== null,
       model,
       contextTokens,
       contextWindow,

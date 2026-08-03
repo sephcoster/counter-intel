@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { SessionDetail } from "../shared/types.js";
 import { compactTokens, linearUrl, prUrl, relativeTime, shortenPath } from "./format.js";
+import { useFocus } from "./useFocus.js";
 
 interface Props {
   detail: SessionDetail;
@@ -11,6 +12,7 @@ type Tab = "activity" | "files" | "events";
 
 export function DetailPanel({ detail: d, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("activity");
+  const { state: focusState, message: focusMessage, focus } = useFocus();
   const resumeCmd = `cd ${d.cwd ?? "."} && claude --resume ${d.sessionId}`;
 
   return (
@@ -58,9 +60,21 @@ export function DetailPanel({ detail: d, onClose }: Props) {
         </div>
       )}
 
+      <div className="drawer-actions">
+        <button
+          className={`primary jump-${focusState}`}
+          disabled={!d.canFocus || focusState === "working"}
+          onClick={() => void focus(d.sessionId)}
+          title={d.canFocus ? `Focus ${d.tty}` : "No terminal recorded for this session yet"}
+        >
+          {focusState === "ok" ? "✓ Focused" : focusState === "working" ? "Jumping…" : "⇥ Jump to tab"}
+        </button>
+        <button onClick={() => void navigator.clipboard.writeText(resumeCmd)}>Copy resume command</button>
+      </div>
+      {focusMessage && <div className="drawer-note">{focusMessage}</div>}
+
       <div className="resume">
         <code>{resumeCmd}</code>
-        <button onClick={() => void navigator.clipboard.writeText(resumeCmd)}>Copy</button>
       </div>
 
       <nav className="tabs">

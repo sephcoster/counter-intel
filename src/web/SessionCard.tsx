@@ -1,5 +1,6 @@
 import type { SessionSummary } from "../shared/types.js";
 import { compactTokens, relativeTime, shortenPath } from "./format.js";
+import { useFocus } from "./useFocus.js";
 
 interface Props {
   session: SessionSummary;
@@ -16,12 +17,36 @@ function contextTone(pct: number): string {
 export function SessionCard({ session: s, active, onClick }: Props) {
   const title = s.title ?? s.firstPrompt ?? "(untitled session)";
   const tone = contextTone(s.contextPct);
+  const { state, message, focus } = useFocus();
 
   return (
-    <button className={`card ${active ? "card-active" : ""}`} onClick={onClick}>
+    <div
+      className={`card ${active ? "card-active" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
       <div className="card-top">
         <span className={`dot status-${s.status}`} />
         <h3 title={title}>{title}</h3>
+        {s.canFocus && (
+          <button
+            className={`jump jump-${state}`}
+            title={message ?? `Jump to ${s.tty}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              void focus(s.sessionId);
+            }}
+          >
+            {state === "ok" ? "✓" : state === "failed" ? "!" : "⇥"}
+          </button>
+        )}
       </div>
 
       <div className="card-meta">
@@ -60,6 +85,6 @@ export function SessionCard({ session: s, active, onClick }: Props) {
         </div>
         <span className="when">{relativeTime(s.updatedAt)}</span>
       </div>
-    </button>
+    </div>
   );
 }

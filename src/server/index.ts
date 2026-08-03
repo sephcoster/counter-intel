@@ -7,6 +7,7 @@ import { indexAll } from "./indexer.js";
 import { ingestHookEvents } from "./ingest.js";
 import { listSessions, getSession } from "./status.js";
 import { clearRepoCache } from "./git.js";
+import { focusTty } from "./focus.js";
 
 const PORT = Number(process.env.PORT ?? 4317);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -29,6 +30,14 @@ app.get("/api/sessions/:id", async (req, reply) => {
   const detail = getSession(id);
   if (!detail) return reply.code(404).send({ error: "unknown session" });
   return detail;
+});
+
+app.post("/api/sessions/:id/focus", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const detail = getSession(id);
+  if (!detail) return reply.code(404).send({ error: "unknown session" });
+  const result = await focusTty(detail.tty);
+  return reply.code(result.ok ? 200 : 409).send(result);
 });
 
 app.post("/api/refresh", async (req) => {

@@ -23,6 +23,7 @@ export interface SessionSummary {
   statusSource: "hook" | "process" | "mtime";
   pid: number | null;
   tty: string | null;
+  canFocus: boolean;
   model: string | null;
   contextTokens: number;
   contextWindow: number;
