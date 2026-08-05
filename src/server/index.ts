@@ -43,6 +43,23 @@ app.post("/api/sessions/:id/focus", async (req, reply) => {
   return reply.code(result.ok ? 200 : 409).send(result);
 });
 
+app.get("/api/supervisor", async () => ({
+  config: loadSupervisorConfig(),
+  findings: openFindings(),
+  nudges: recentNudges(30),
+}));
+
+app.patch("/api/supervisor/config", async (req) => {
+  const config = saveSupervisorConfig(req.body as Record<string, unknown>);
+  restartScheduler();
+  return config;
+});
+
+app.post("/api/supervisor/run", async (req) => {
+  const q = req.query as Record<string, string | undefined>;
+  return runOnce({ force: q.force === "1" || q.force === "true" });
+});
+
 app.post("/api/refresh", async (req) => {
   const q = req.query as Record<string, string | undefined>;
   const force = q.force === "1" || q.force === "true";
@@ -67,6 +84,7 @@ console.log(
     `(${(boot.bytesRead / 1024 / 1024).toFixed(1)} MB) in ${boot.ms}ms`,
 );
 ingestHookEvents();
+startScheduler();
 
 setInterval(() => {
   try {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SessionDetail, SessionStatus, SessionSummary } from "../shared/types.js";
 import { SessionCard } from "./SessionCard.js";
 import { DetailPanel } from "./DetailPanel.js";
+import { SupervisorPanel } from "./SupervisorPanel.js";
 
 const STATUS_ORDER: SessionStatus[] = ["blocked", "waiting", "working", "idle", "ended"];
 
@@ -38,6 +39,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [showSupervisor, setShowSupervisor] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -125,7 +127,7 @@ export function App() {
   }, [visible]);
 
   return (
-    <div className={`app ${detail ? "app-drawered" : ""}`}>
+    <div className={`app ${detail || showSupervisor ? "app-drawered" : ""}`}>
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" />
@@ -156,6 +158,15 @@ export function App() {
               </button>
             ))}
           </div>
+          <button
+            className={`sup-open ${showSupervisor ? "on" : ""}`}
+            onClick={() => {
+              setShowSupervisor((v) => !v);
+              setSelected(null);
+            }}
+          >
+            Supervisor
+          </button>
         </div>
       </header>
 
@@ -194,6 +205,7 @@ export function App() {
       </footer>
 
       {detail && <DetailPanel detail={detail} onClose={() => setSelected(null)} />}
+      {showSupervisor && <SupervisorPanel onClose={() => setShowSupervisor(false)} />}
     </div>
   );
 }

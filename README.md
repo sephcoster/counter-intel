@@ -98,9 +98,65 @@ and drives iTerm2 via AppleScript with Terminal.app as a fallback.
 macOS may ask for Automation permission the first time. Sessions with no recorded TTY —
 background and daemon-spawned ones — don't show the button.
 
+## Supervisor
+
+An optional management layer that scans on an interval during core hours, finds sessions
+stalled on pull requests or unlanded work, and can nudge them back into motion. Configured in
+`~/.claude/counter-intel/supervisor.json`; ships **disabled and in dry-run**.
+
+```json
+{
+  "enabled": false,
+  "dryRun": true,
+  "intervalMinutes": 45,
+  "coreHours": { "start": "09:00", "end": "18:00", "days": [1,2,3,4,5], "timezone": "America/New_York" },
+  "maxNudgesPerRun": 3,
+  "minNudgeIntervalHours": 4,
+  "maxSessionAgeHours": 72,
+  "model": "claude-sonnet-5"
+}
+```
+
+**Detection is deterministic and free.** One `gh pr list` per repo gives draft state,
+mergeability, review decision and check rollup; one GraphQL call per PR adds unresolved review
+threads; git supplies unpushed commits and pushed-but-no-PR. A 55-session scan takes ~7s and
+costs nothing. Branch state is queried *by name* rather than read from the worktree — idle
+worktrees move on, and reading the current branch attributes its problems to every stale
+session sharing the directory.
+
+**The model judges, it doesn't detect** — and it is gated on a fingerprint of the signal set,
+so an unchanged situation reuses the stored verdict and makes no call. It earns its keep by
+rejecting false positives: unpushed commits on a research branch, work deliberately parked
+pending your go-ahead, signals belonging to a branch the session isn't on.
+
+### Why the model never writes the nudge
+
+PR titles, review comments and CI output are attacker-influenced and they reach the triage
+digest. If the model authored the nudge text, anyone able to comment on a PR could write text
+that gets typed into a terminal running Claude with auto-approved permissions.
+
+So the model only picks a template id. The server renders the string from templates in
+`supervisor/templates.ts` using values that come exclusively from git and `gh`. A hostile
+comment can at worst cause the wrong template to be chosen. Rendered text is additionally
+checked against a conservative character allowlist and a length cap before it is sent.
+
+### Nudge safety
+
+Injection is defended in layers, because text sent to a session sitting at a permission prompt
+would answer it:
+
+- `dryRun: true` by default — nudges are drafted, logged, and never sent
+- only sessions the hook registry reports as `waiting` are eligible (never `blocked`)
+- iTerm's own `is processing` flag is re-checked inside the same AppleScript as the write
+- session state is re-read at send time, not trusted from the scan
+- per-session rate limit and a per-run ceiling
+- every attempt is recorded in `nudges` with its outcome
+
+The daemon calls `osascript` as an ordinary process, so this needs no Claude permission grant.
+Adding `Bash(osascript:*)` to `~/.claude/settings.json` would grant broad GUI automation to
+every session on the machine — don't.
+
 ## Not built yet
 
-- Ask a question about a session without interrupting it, via `claude -p --fork-session`
-- A manager agent coordinating across sessions
-
-No LLM calls anywhere in this app yet; everything above is deterministic parsing.
+- Ask a question about a session without interrupting it (see git history for the cost analysis)
+- Cross-session coordination beyond nudging

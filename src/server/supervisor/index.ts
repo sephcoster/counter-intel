@@ -3,6 +3,7 @@ import { listSessions } from "../status.js";
 import { detect } from "./signals.js";
 import { verdictFor, clearFindingsFor, type Verdict } from "./triage.js";
 import { sendNudge, type NudgeOutcome } from "./nudge.js";
+import { renderNudge, type NudgeContext } from "./templates.js";
 import { loadSupervisorConfig, withinCoreHours, type SupervisorConfig } from "./config.js";
 
 export interface RunSummary {
@@ -66,19 +67,22 @@ export async function runOnce(options: { force?: boolean } = {}): Promise<RunSum
       const { result, costUsd: cost } = await verdictFor(finding, config);
       costUsd += cost;
       if (cost > 0) triageCalls += 1;
-      if (!result?.verdict.stuck || !result.verdict.nudge) continue;
+      if (!result?.verdict.stuck || !result.verdict.template) continue;
       if (nudges.length >= config.maxNudgesPerRun) break;
+
+      const text = renderNudge(result.verdict.template, contextFor(finding));
+      if (!text) continue;
 
       const outcome = await sendNudge(
         finding.session.sessionId,
-        result.verdict.nudge,
+        text,
         result.findingId,
         config,
       );
       nudges.push({
         sessionId: finding.session.sessionId,
         title: finding.session.title,
-        text: result.verdict.nudge,
+        text,
         outcome: outcome.outcome,
       });
     }
@@ -104,6 +108,31 @@ export async function runOnce(options: { force?: boolean } = {}): Promise<RunSum
     ms: Date.now() - started,
     ...(error ? { skippedReason: `error: ${error}` } : {}),
   };
+}
+
+/** Every value here comes from git or gh, never from the transcript or the model. */
+function contextFor(f: Awaited<ReturnType<typeof detect>>[number]): NudgeContext {
+  const numberFrom = (prefix: string): number => {
+    const hit = f.signals.find((s) => s.key.startsWith(prefix));
+    return hit ? Number(hit.key.split(":")[1]) || 0 : 0;
+  };
+  const idleSignal = f.signals.find((s) => s.key.startsWith("idle-mid-task:"));
+  return {
+    branch: f.session.gitBranch,
+    prNumber: f.pr?.number ?? null,
+    unpushedCommits: numberFrom("unpushed-commits:"),
+    branchCommits: f.pr ? 0 : numberFrom("branch-commits:") || commitsFromSummary(f),
+    failedChecks: f.pr?.failedChecks ?? 0,
+    unresolvedThreads: numberFrom("pr-unresolved-threads:"),
+    idleHours: idleSignal ? Number(idleSignal.key.split(":")[1]?.replace("h", "")) || 0 : 0,
+  };
+}
+
+function commitsFromSummary(f: Awaited<ReturnType<typeof detect>>[number]): number {
+  const hit = f.signals.find((s) => s.key === "branch-no-pr");
+  if (!hit) return 0;
+  const match = /with (\d+) commit/.exec(hit.summary);
+  return match ? Number(match[1]) : 0;
 }
 
 function severityScore(f: Awaited<ReturnType<typeof detect>>[number]): number {
