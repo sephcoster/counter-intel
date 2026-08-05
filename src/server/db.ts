@@ -82,6 +82,45 @@ CREATE TABLE IF NOT EXISTS ingest_state (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS findings (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id  TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  signals     TEXT NOT NULL,
+  verdict     TEXT,
+  created_at  TEXT NOT NULL,
+  cleared_at  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS findings_open ON findings (session_id, cleared_at);
+
+CREATE TABLE IF NOT EXISTS nudges (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id     TEXT NOT NULL,
+  finding_id     INTEGER,
+  text           TEXT NOT NULL,
+  outcome        TEXT NOT NULL,
+  detail         TEXT,
+  session_status TEXT,
+  tty            TEXT,
+  created_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS nudges_by_session ON nudges (session_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS supervisor_runs (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at      TEXT NOT NULL,
+  finished_at     TEXT,
+  sessions_scanned INTEGER NOT NULL DEFAULT 0,
+  signals_found   INTEGER NOT NULL DEFAULT 0,
+  triage_calls    INTEGER NOT NULL DEFAULT 0,
+  nudges_sent     INTEGER NOT NULL DEFAULT 0,
+  cost_usd        REAL NOT NULL DEFAULT 0,
+  skipped_reason  TEXT,
+  error           TEXT
+);
 `);
 
 export function resetIncrementalCursors(): void {

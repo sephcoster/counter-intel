@@ -8,6 +8,9 @@ import { ingestHookEvents } from "./ingest.js";
 import { listSessions, getSession } from "./status.js";
 import { clearRepoCache } from "./git.js";
 import { focusTty } from "./focus.js";
+import { runOnce, openFindings, startScheduler, restartScheduler } from "./supervisor/index.js";
+import { loadSupervisorConfig, saveSupervisorConfig } from "./supervisor/config.js";
+import { recentNudges } from "./supervisor/nudge.js";
 
 const PORT = Number(process.env.PORT ?? 4317);
 const HOST = process.env.HOST ?? "127.0.0.1";
