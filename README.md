@@ -140,6 +140,23 @@ So the model only picks a template id. The server renders the string from templa
 comment can at worst cause the wrong template to be chosen. Rendered text is additionally
 checked against a conservative character allowlist and a length cap before it is sent.
 
+### Acting on a finding
+
+Each finding is clickable and carries its own actions: **Details** opens the session drawer,
+**Jump to tab** focuses its terminal, **Send nudge** sends immediately, and **Dismiss** removes
+it.
+
+Dismissing suppresses that exact signal fingerprint — the finding stays gone, and later scans
+skip it *before* consulting the model, so a dismissed finding costs nothing on every subsequent
+run. If the situation changes the fingerprint changes with it, so a genuinely new problem still
+surfaces.
+
+Sessions whose terminal is gone are marked **no terminal** and can never be nudged; a bulk
+**Dismiss N with no terminal** clears them in one click.
+
+**Send nudge** is an explicit act, so it ignores `dryRun` — but every other guard (status, busy,
+rate limit) still applies, and the attempt is logged like any other.
+
 ### Nudge safety
 
 Injection is defended in layers, because text sent to a session sitting at a permission prompt

@@ -205,7 +205,15 @@ export function App() {
       </footer>
 
       {detail && <DetailPanel detail={detail} onClose={() => setSelected(null)} />}
-      {showSupervisor && <SupervisorPanel onClose={() => setShowSupervisor(false)} />}
+      {showSupervisor && (
+        <SupervisorPanel
+          onClose={() => setShowSupervisor(false)}
+          onOpenSession={(id) => {
+            setShowSupervisor(false);
+            setSelected(id);
+          }}
+        />
+      )}
     </div>
   );
 }

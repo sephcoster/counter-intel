@@ -15,11 +15,15 @@ interface Verdict {
 }
 
 interface Finding {
+  findingId: number;
   sessionId: string;
   title: string | null;
   branch: string | null;
   projectName: string;
   status: string;
+  canFocus: boolean;
+  actionable: boolean;
+  nudgeText: string | null;
   signals: Signal[];
   verdict: Verdict | null;
   createdAt: string;
@@ -65,7 +69,12 @@ const OUTCOME_TONE: Record<string, string> = {
   "no-terminal": "bad",
 };
 
-export function SupervisorPanel({ onClose }: { onClose: () => void }) {
+interface Props {
+  onClose: () => void;
+  onOpenSession: (sessionId: string) => void;
+}
+
+export function SupervisorPanel({ onClose, onOpenSession }: Props) {
   const [data, setData] = useState<Payload | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -120,8 +129,24 @@ export function SupervisorPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const act = async (path: string, label: string) => {
+    setBusy(true);
+    try {
+      const res = await fetch(path, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (body.outcome) setNote(`${label}: ${body.outcome}${body.detail ? ` — ${body.detail}` : ""}`);
+      else if (typeof body.dismissed === "number") setNote(`Dismissed ${body.dismissed}`);
+      await load();
+    } catch (err) {
+      setNote(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!data) return null;
   const { config, findings, nudges } = data;
+  const unactionable = findings.filter((f) => !f.actionable).length;
 
   return (
     <aside className="drawer supervisor">
@@ -173,13 +198,36 @@ export function SupervisorPanel({ onClose }: { onClose: () => void }) {
       {note && <div className="sup-note">{note}</div>}
 
       <div className="drawer-body">
-        <h3 className="sup-heading">Stuck ({findings.length})</h3>
+        <div className="sup-heading-row">
+          <h3 className="sup-heading">Stuck ({findings.length})</h3>
+          {unactionable > 0 && (
+            <button
+              className="link-btn"
+              disabled={busy}
+              onClick={() => void act("/api/supervisor/dismiss-unactionable", "dismiss")}
+            >
+              Dismiss {unactionable} with no terminal
+            </button>
+          )}
+        </div>
         {findings.length === 0 && <p className="muted">Nothing flagged.</p>}
         {findings.map((f) => (
-          <div key={f.sessionId} className="finding">
-            <div className="finding-head">
+          <div key={f.findingId} className={`finding ${f.actionable ? "" : "finding-dead"}`}>
+            <div
+              className="finding-head clickable"
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenSession(f.sessionId)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpenSession(f.sessionId);
+                }
+              }}
+            >
               <span className={`dot status-${f.status}`} />
               <strong>{f.title ?? "(untitled)"}</strong>
+              {!f.actionable && <span className="badge dead">no terminal</span>}
             </div>
             <div className="finding-sub">
               {f.projectName}
@@ -195,10 +243,41 @@ export function SupervisorPanel({ onClose }: { onClose: () => void }) {
             {f.verdict && (
               <div className={`verdict ${f.verdict.stuck ? "verdict-stuck" : "verdict-ok"}`}>
                 <span>{f.verdict.stuck ? "STUCK" : "not stuck"}</span> · {f.verdict.reason}
-                {f.verdict.template && <code>{f.verdict.template}</code>}
               </div>
             )}
             {!f.verdict && <div className="muted small">Awaiting triage — run a scan.</div>}
+            {f.nudgeText && <div className="nudge-preview">{f.nudgeText}</div>}
+            <div className="finding-actions">
+              <button disabled={busy} onClick={() => onOpenSession(f.sessionId)}>
+                Details
+              </button>
+              {f.canFocus && (
+                <button
+                  disabled={busy}
+                  onClick={() => void act(`/api/sessions/${f.sessionId}/focus`, "focus")}
+                >
+                  Jump to tab
+                </button>
+              )}
+              {f.nudgeText && f.actionable && (
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() => void act(`/api/supervisor/findings/${f.findingId}/nudge`, "nudge")}
+                  title="Sends now, ignoring dry run. Status and busy guards still apply."
+                >
+                  Send nudge
+                </button>
+              )}
+              <button
+                className="ghost"
+                disabled={busy}
+                onClick={() => void act(`/api/supervisor/findings/${f.findingId}/dismiss`, "dismiss")}
+                title="Hides this exact signal set. It returns if the situation changes."
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         ))}
 

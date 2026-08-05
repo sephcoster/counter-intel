@@ -72,6 +72,7 @@ export async function runOnce(options: { force?: boolean } = {}): Promise<RunSum
 
       const text = renderNudge(result.verdict.template, contextFor(finding));
       if (!text) continue;
+      setNudgeText.run(text, result.findingId);
 
       const outcome = await sendNudge(
         finding.session.sessionId,
@@ -142,12 +143,19 @@ function severityScore(f: Awaited<ReturnType<typeof detect>>[number]): number {
   );
 }
 
+const setNudgeText = db.prepare("UPDATE findings SET nudge_text = ? WHERE id = ?");
+
 export interface StuckEntry {
+  findingId: number;
   sessionId: string;
   title: string | null;
   branch: string | null;
   projectName: string;
   status: string;
+  canFocus: boolean;
+  /** False when there is no terminal to nudge — the session is gone or never had a tty. */
+  actionable: boolean;
+  nudgeText: string | null;
   signals: Array<{ key: string; severity: string; summary: string }>;
   verdict: Verdict | null;
   createdAt: string;
@@ -156,10 +164,10 @@ export interface StuckEntry {
 export function openFindings(): StuckEntry[] {
   const rows = db
     .prepare(
-      `SELECT f.session_id, f.signals, f.verdict, f.created_at,
-              s.title, s.git_branch, s.cwd, s.project_dir
+      `SELECT f.id, f.session_id, f.signals, f.verdict, f.created_at, f.nudge_text,
+              s.title, s.git_branch
        FROM findings f JOIN sessions s ON s.session_id = f.session_id
-       WHERE f.cleared_at IS NULL
+       WHERE f.cleared_at IS NULL AND f.dismissed_at IS NULL
        ORDER BY f.id DESC`,
     )
     .all() as Array<Record<string, unknown>>;
@@ -169,16 +177,48 @@ export function openFindings(): StuckEntry[] {
   return rows.map((r) => {
     const session = byId.get(String(r.session_id));
     return {
+      findingId: Number(r.id),
       sessionId: String(r.session_id),
       title: (r.title as string | null) ?? null,
       branch: (r.git_branch as string | null) ?? null,
       projectName: session?.projectName ?? "",
       status: session?.status ?? "unknown",
+      canFocus: session?.canFocus ?? false,
+      actionable: Boolean(session?.tty) && session?.status !== "ended",
+      nudgeText: (r.nudge_text as string | null) ?? null,
       signals: safeParse(r.signals) ?? [],
       verdict: safeParse(r.verdict),
       createdAt: String(r.created_at),
     };
   });
+}
+
+const markDismissed = db.prepare(
+  "UPDATE findings SET dismissed_at = ?, cleared_at = COALESCE(cleared_at, ?) WHERE id = ?",
+);
+
+export function dismissFinding(findingId: number): boolean {
+  const now = new Date().toISOString();
+  return markDismissed.run(now, now, findingId).changes > 0;
+}
+
+export function dismissUnactionable(): number {
+  const targets = openFindings().filter((f) => !f.actionable);
+  for (const f of targets) dismissFinding(f.findingId);
+  return targets.length;
+}
+
+export async function nudgeFinding(findingId: number): Promise<{ outcome: string; detail: string | null }> {
+  const row = db
+    .prepare("SELECT id, session_id, nudge_text FROM findings WHERE id = ? AND cleared_at IS NULL")
+    .get(findingId) as { id: number; session_id: string; nudge_text: string | null } | undefined;
+
+  if (!row?.nudge_text) return { outcome: "not-found", detail: "no nudge text on this finding" };
+
+  // A manual send is an explicit act, so it ignores dryRun — but every safety
+  // guard (status, busy, rate limit) still applies.
+  const config = { ...loadSupervisorConfig(), dryRun: false };
+  return sendNudge(row.session_id, row.nudge_text, row.id, config);
 }
 
 function safeParse(value: unknown): any {

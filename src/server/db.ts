@@ -123,6 +123,15 @@ CREATE TABLE IF NOT EXISTS supervisor_runs (
 );
 `);
 
+function addColumn(table: string, column: string, definition: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+addColumn("findings", "nudge_text", "TEXT");
+addColumn("findings", "dismissed_at", "TEXT");
+
 export function resetIncrementalCursors(): void {
   db.prepare("UPDATE sessions SET bytes_read = 0").run();
 }

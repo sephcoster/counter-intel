@@ -153,6 +153,11 @@ export async function triage(
 const findOpen = db.prepare(
   "SELECT id, fingerprint, verdict FROM findings WHERE session_id = ? AND cleared_at IS NULL ORDER BY id DESC LIMIT 1",
 );
+// A dismissal suppresses that exact signal set. If the situation changes the
+// fingerprint changes with it, so a genuinely new problem still surfaces.
+const isDismissed = db.prepare(
+  "SELECT 1 FROM findings WHERE session_id = ? AND fingerprint = ? AND dismissed_at IS NOT NULL LIMIT 1",
+);
 const insertFinding = db.prepare(
   "INSERT INTO findings (session_id, fingerprint, signals, verdict, created_at) VALUES (?, ?, ?, ?, ?)",
 );
@@ -174,6 +179,10 @@ export async function verdictFor(
   finding: SessionFindings,
   config: SupervisorConfig,
 ): Promise<{ result: CachedVerdict | null; costUsd: number }> {
+  if (isDismissed.get(finding.session.sessionId, finding.fingerprint)) {
+    return { result: null, costUsd: 0 };
+  }
+
   const existing = findOpen.get(finding.session.sessionId) as
     | { id: number; fingerprint: string; verdict: string | null }
     | undefined;

@@ -8,7 +8,10 @@ import { ingestHookEvents } from "./ingest.js";
 import { listSessions, getSession } from "./status.js";
 import { clearRepoCache } from "./git.js";
 import { focusTty } from "./focus.js";
-import { runOnce, openFindings, startScheduler, restartScheduler } from "./supervisor/index.js";
+import {
+  runOnce, openFindings, startScheduler, restartScheduler,
+  dismissFinding, dismissUnactionable, nudgeFinding,
+} from "./supervisor/index.js";
 import { loadSupervisorConfig, saveSupervisorConfig } from "./supervisor/config.js";
 import { recentNudges } from "./supervisor/nudge.js";
 
@@ -59,6 +62,21 @@ app.post("/api/supervisor/run", async (req) => {
   const q = req.query as Record<string, string | undefined>;
   return runOnce({ force: q.force === "1" || q.force === "true" });
 });
+
+app.post("/api/supervisor/findings/:id/dismiss", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const ok = dismissFinding(Number(id));
+  return ok ? { ok } : reply.code(404).send({ error: "unknown finding" });
+});
+
+app.post("/api/supervisor/findings/:id/nudge", async (req) => {
+  const { id } = req.params as { id: string };
+  return nudgeFinding(Number(id));
+});
+
+app.post("/api/supervisor/dismiss-unactionable", async () => ({
+  dismissed: dismissUnactionable(),
+}));
 
 app.post("/api/refresh", async (req) => {
   const q = req.query as Record<string, string | undefined>;

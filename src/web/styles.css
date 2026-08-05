@@ -122,9 +122,41 @@ body {
 }
 .sup-heading + .sup-heading, .nudge-log + .sup-heading { margin-top: 22px; }
 
+.sup-heading-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.link-btn {
+  background: none; border: none; padding: 0; cursor: pointer;
+  color: var(--text-faint); font-size: 11px; text-decoration: underline;
+}
+.link-btn:hover:not(:disabled) { color: var(--accent); }
+.link-btn:disabled { opacity: 0.5; cursor: wait; }
+
 .finding { padding: 11px 0; border-bottom: 1px solid var(--border); }
+.finding-dead { opacity: 0.62; }
 .finding-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .finding-head .dot { margin-top: 0; }
+.finding-head.clickable { cursor: pointer; border-radius: 5px; margin: -2px -4px 0; padding: 2px 4px; }
+.finding-head.clickable:hover { background: var(--bg-hover); }
+.finding-head.clickable:hover strong { color: var(--accent); }
+.badge.dead { background: var(--bg-hover); color: var(--text-faint); margin-left: auto; }
+
+.nudge-preview {
+  margin: 8px 0 0 16px; padding: 7px 9px;
+  background: var(--bg); border-left: 2px solid var(--accent);
+  border-radius: 0 5px 5px 0; font-size: 12px; color: var(--text);
+}
+
+.finding-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 9px 0 0 16px; }
+.finding-actions button {
+  padding: 4px 10px; background: var(--bg-hover); border: 1px solid var(--border-strong);
+  border-radius: 5px; color: var(--text-dim); font-size: 11.5px; cursor: pointer;
+}
+.finding-actions button:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.finding-actions button:disabled { opacity: 0.45; cursor: wait; }
+.finding-actions .primary {
+  background: rgba(91, 157, 255, 0.14); border-color: rgba(91, 157, 255, 0.4); color: var(--accent);
+}
+.finding-actions .ghost { margin-left: auto; border-color: transparent; color: var(--text-faint); }
+.finding-actions .ghost:hover:not(:disabled) { color: var(--blocked); border-color: rgba(255, 107, 91, 0.4); }
 .finding-sub { display: flex; gap: 8px; align-items: center; margin: 4px 0 7px 16px; font-size: 11.5px; color: var(--text-dim); }
 .finding-signals { list-style: none; margin: 0 0 7px 16px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
 .finding-signals li { font-size: 12px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
