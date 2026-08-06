@@ -71,6 +71,7 @@ body {
 
 .controls { display: flex; gap: 10px; margin-left: auto; align-items: center; }
 
+.search-wrap { position: relative; display: flex; align-items: center; }
 .search {
   width: 260px; padding: 6px 11px;
   background: var(--bg-raised); border: 1px solid var(--border);
@@ -78,6 +79,15 @@ body {
 }
 .search:focus { outline: none; border-color: var(--accent); }
 .search::placeholder { color: var(--text-faint); }
+.search-wrap:has(.search-clear) .search { padding-right: 28px; }
+
+.search-clear {
+  position: absolute; right: 5px;
+  width: 18px; height: 18px; display: grid; place-items: center;
+  background: var(--bg-hover); border: none; border-radius: 50%;
+  color: var(--text-faint); font-size: 14px; line-height: 1; cursor: pointer; padding: 0;
+}
+.search-clear:hover { background: var(--border-strong); color: var(--text); }
 
 .segmented { display: flex; background: var(--bg-raised); border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
 .segmented button {

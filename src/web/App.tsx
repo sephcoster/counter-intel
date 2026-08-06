@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionDetail, SessionStatus, SessionSummary } from "../shared/types.js";
 import { SessionCard } from "./SessionCard.js";
 import { DetailPanel } from "./DetailPanel.js";
@@ -40,6 +40,12 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<string | null>(null);
   const [showSupervisor, setShowSupervisor] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const clearQuery = useCallback(() => {
+    setQuery("");
+    searchRef.current?.focus();
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -145,12 +151,27 @@ export function App() {
         </div>
 
         <div className="controls">
-          <input
-            className="search"
-            placeholder="Filter by title, branch, path, PR…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+          <div className="search-wrap">
+            <input
+              ref={searchRef}
+              className="search"
+              placeholder="Filter by title, branch, path, PR…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Clear the field rather than letting Escape close an open drawer.
+                if (e.key === "Escape" && query) {
+                  e.stopPropagation();
+                  clearQuery();
+                }
+              }}
+            />
+            {query && (
+              <button className="search-clear" onClick={clearQuery} aria-label="Clear filter">
+                ×
+              </button>
+            )}
+          </div>
           <div className="segmented">
             {(Object.keys(SCOPE_LABEL) as Scope[]).map((s) => (
               <button key={s} className={scope === s ? "on" : ""} onClick={() => setScope(s)}>
