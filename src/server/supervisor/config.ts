@@ -31,11 +31,19 @@ export interface SupervisorConfig {
 const CONFIG_DIR = process.env.COUNTER_INTEL_HOME ?? join(homedir(), ".claude", "counter-intel");
 const CONFIG_PATH = join(CONFIG_DIR, "supervisor.json");
 
+function systemTimezone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
 const DEFAULTS: SupervisorConfig = {
   enabled: false,
   dryRun: true,
   intervalMinutes: 45,
-  coreHours: { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5], timezone: "America/New_York" },
+  coreHours: { start: "09:00", end: "18:00", days: [1, 2, 3, 4, 5], timezone: systemTimezone() },
   minNudgeIntervalHours: 4,
   maxNudgesPerRun: 3,
   // "waiting" means the Stop hook fired: Claude finished its turn and the terminal

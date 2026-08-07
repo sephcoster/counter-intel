@@ -61,17 +61,18 @@ mark.
 
 ### Linear tickets
 
-`SWITCH-1` and `XFMR-2` are indistinguishable from real ticket keys by pattern alone, so
-recognized team prefixes are an explicit allowlist in
+Ticket keys are matched by pattern, which is ambiguous: if your domain uses
+uppercase-dash-number identifiers for anything else (`ORDER-1`, `SWITCH-2`), those look
+exactly like ticket references. Declare your team keys to disambiguate, in
 `~/.claude/counter-intel/config.json`:
 
 ```json
-{ "linearPrefixes": ["ALL", "BOLT", "CIR", "ENG", "XENG", "XEG", "INF", "INFR"] }
+{ "linearPrefixes": ["ENG", "PLATFORM"] }
 ```
 
+The default is `[]`, which uses heuristics instead — hex fragments from UUIDs and commit SHAs
+are dropped, along with known standards like `ISO-8601` and DeepSource codes like `JS-0045`.
 Keys found inside `linear.app/.../issue/...` URLs are always trusted regardless of the list.
-Set `linearPrefixes` to `[]` to fall back to heuristics (drops hex fragments and known
-standards like `ISO-8601`, `JS-0045`).
 
 ## Layout
 
