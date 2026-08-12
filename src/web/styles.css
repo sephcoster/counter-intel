@@ -287,6 +287,25 @@ body {
 
 .empty { text-align: center; padding: 60px 20px; color: var(--text-faint); }
 .empty p { margin: 0 0 6px; color: var(--text-dim); }
+.empty-live { padding: 34px 20px; }
+
+.past { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 6px; }
+.past-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 2px; margin-bottom: 6px;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font: inherit; font-size: 12px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.past-toggle:hover { color: var(--text); }
+.past-toggle .count { color: var(--text-faint); font-weight: 400; }
+.past-hint {
+  margin-left: auto; text-transform: none; letter-spacing: 0;
+  font-weight: 400; font-size: 11px; color: var(--text-faint);
+}
+.chevron { display: inline-block; transition: transform 0.15s; font-size: 10px; }
+.chevron.open { transform: rotate(90deg); }
+.past .group { margin-top: 14px; }
 
 .statusbar {
   position: fixed; bottom: 0; left: 0; right: 0;

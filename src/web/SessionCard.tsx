@@ -55,6 +55,7 @@ export function SessionCard({ session: s, active, onClick }: Props) {
         </span>
         {s.gitBranch && <span className="branch">{s.gitBranch}</span>}
         {s.isWorktree && <span className="badge worktree">worktree</span>}
+        {s.isLive && !s.canFocus && <span className="badge dead">no tab</span>}
         {s.permissionMode && s.permissionMode !== "default" && (
           <span className="badge mode">{s.permissionMode}</span>
         )}

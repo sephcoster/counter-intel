@@ -24,6 +24,12 @@ export interface SessionSummary {
   pid: number | null;
   tty: string | null;
   canFocus: boolean;
+  /**
+   * True when a claude process for this session is currently running. This is the
+   * only dependable "open in a tab" signal — `/clear` reuses the session id, file
+   * and process, so it leaves nothing to distinguish it from an ordinary message.
+   */
+  isLive: boolean;
   model: string | null;
   contextTokens: number;
   contextWindow: number;

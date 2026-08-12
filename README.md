@@ -14,7 +14,22 @@ npm run install-hook # optional but recommended — see "Live status"
 
 ## What it shows
 
-Sessions are grouped by what they need from you, most urgent first:
+The board is split in two. The main area holds sessions **currently open in a terminal** —
+those with a running `claude` process. Everything else collapses into **Not open in a terminal**
+at the bottom, expandable when you want the history. The status pills count live sessions only.
+
+A live session with no terminal (daemon- or background-spawned) stays in the main area but is
+badged `no tab`, since it can be genuinely busy — even blocked — while being impossible to jump
+to.
+
+> **`/clear` does not close or archive a session.** It resets the model's context, but the
+> session id, the transcript file, and the OS process all continue — a single transcript can
+> contain several `/clear` records with conversation on both sides of each. So there is nothing
+> in a cleared session that distinguishes it from an ordinary one. "Has a running process" is
+> the only dependable signal for *open in a tab*, which is what the split uses. Closing the tab
+> is what actually ends a session.
+
+Within each area, sessions are grouped by what they need from you, most urgent first:
 
 | Status | Meaning |
 | --- | --- |

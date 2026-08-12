@@ -142,6 +142,9 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
       statusSource: source,
       pid: proc?.pid ?? event?.pid ?? null,
       tty,
+      // Keyed off a matched running process, not off the hook's last-known pid,
+      // which outlives the process it referred to.
+      isLive: proc !== null && status !== "ended",
       // A dead session's tab may still be open, so focusing is offered whenever we
       // know a tty — the AppleScript lookup is what actually decides.
       canFocus: tty !== null,
