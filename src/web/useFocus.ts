@@ -9,7 +9,7 @@ interface FocusBody {
   tmux?: string;
   attachCommand?: string;
   app?: string;
-  via?: "tab" | "tmux" | "tmux-attach";
+  via?: "tab" | "tmux" | "tmux-attach" | "app";
 }
 
 const MESSAGES: Record<string, string> = {
@@ -18,7 +18,7 @@ const MESSAGES: Record<string, string> = {
   "no-terminal": "iTerm2 and Terminal are both closed",
   "tmux-gone": "That tmux pane is no longer there",
   "tmux-other-session": "Nothing is showing this tmux session",
-  "tmux-client-unreachable": "Its tmux client is not a local terminal tab",
+  "tmux-client-unreachable": "Could not raise the terminal showing this tmux session",
   error: "Could not talk to the terminal",
 };
 
@@ -44,6 +44,8 @@ export function useFocus() {
         setState("ok");
         if (body.via === "tmux-attach") {
           setMessage(`Attached ${body.tmux} in a new ${body.app} window`);
+        } else if (body.via === "app") {
+          setMessage(`Raised ${body.app} — it exposes no way to pick the window, so check the front one`);
         }
         setTimeout(() => setState("idle"), 1200);
         return;
