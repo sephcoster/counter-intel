@@ -1,5 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
+import { basename } from "node:path";
+import { realpathSync } from "node:fs";
 import { tmuxSnapshot, paneLabel, attachCommand, selectPane, type TmuxPane, type TmuxSnapshot } from "./tmux.js";
 
 const run = promisify(execFile);
@@ -14,7 +16,7 @@ export type FocusFailure =
   | "tmux-client-unreachable";
 
 export type FocusResult =
-  | { ok: true; app: string; via: "tab" | "tmux" | "tmux-attach"; tmux?: string }
+  | { ok: true; app: string; via: "tab" | "tmux" | "tmux-attach" | "app"; tmux?: string }
   | { ok: false; reason: FocusFailure; detail?: string; tmux?: string; attachCommand?: string };
 
 // osascript takes the tty via argv rather than string interpolation so a hostile
@@ -95,12 +97,102 @@ async function tryScript(script: string, arg: string): Promise<string> {
   }
 }
 
+interface OwningApp {
+  bundle: string;
+  name: string;
+}
+
+const APP_BUNDLE = /^(\/.*\.app)\/Contents\/MacOS\//;
+
+// `ps` reports the path as invoked, and neither `comm` nor `command` resolves symlinks —
+// a Homebrew-cask terminal launched from the CLI shows up as `/opt/homebrew/bin/foo`,
+// which hides the bundle it actually lives in.
+function bundleFor(executable: string): string | null {
+  const direct = APP_BUNDLE.exec(executable);
+  if (direct) return direct[1];
+  try {
+    const resolved = APP_BUNDLE.exec(realpathSync(executable));
+    return resolved ? resolved[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The application hosting a tty, found by walking the tty's process ancestry. Used
+ * for terminals with no AppleScript dictionary — Alacritty, kitty, WezTerm, VS Code —
+ * which the tty search above cannot see at all.
+ *
+ * Returns the *highest* .app ancestor: nested helper bundles (`Code Helper.app`) sit
+ * below the real one, so the first match walking up is the wrong one. A tmux pane tty
+ * has no such ancestor, which is correct — panes are resolved through tmux instead.
+ */
+function appForTty(tty: string): OwningApp | null {
+  let table: string;
+  try {
+    table = execFileSync("ps", ["-eo", "pid=,ppid=,comm="], {
+      encoding: "utf8",
+      timeout: 5000,
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+
+  const parents = new Map<number, number>();
+  const executables = new Map<number, string>();
+  for (const line of table.split("\n")) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (!m) continue;
+    parents.set(Number(m[1]), Number(m[2]));
+    executables.set(Number(m[1]), m[3]);
+  }
+
+  let pid: number | null = null;
+  try {
+    const owner = execFileSync("ps", ["-t", tty, "-o", "pid="], {
+      encoding: "utf8",
+      timeout: 5000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const first = owner.trim().split("\n")[0]?.trim();
+    pid = first ? Number(first) : null;
+  } catch {
+    return null;
+  }
+  if (!pid || !Number.isFinite(pid)) return null;
+
+  let found: OwningApp | null = null;
+  for (let hops = 0; pid && pid > 1 && hops < 40; hops += 1) {
+    const bundle = bundleFor(executables.get(pid) ?? "");
+    if (bundle) found = { bundle, name: basename(bundle, ".app") };
+    pid = parents.get(pid) ?? null;
+  }
+  return found;
+}
+
+// `open -a` needs no Automation grant, but it can only raise the application — an app
+// with no scripting dictionary exposes no way to pick the window, so callers report
+// this as a coarser jump than a tab focus.
+async function activateApp(app: OwningApp): Promise<boolean> {
+  try {
+    await run("open", ["-a", app.bundle], { timeout: 8000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function focusEmulatorTab(tty: string): Promise<FocusResult> {
   const iterm = await tryScript(ITERM_SCRIPT, tty);
   if (iterm === "ok") return { ok: true, app: "iTerm2", via: "tab" };
 
   const terminal = await tryScript(TERMINAL_SCRIPT, tty);
   if (terminal === "ok") return { ok: true, app: "Terminal", via: "tab" };
+
+  const app = appForTty(tty);
+  if (app && (await activateApp(app))) return { ok: true, app: app.name, via: "app" };
 
   if (iterm === "notrunning" && terminal === "notrunning") return { ok: false, reason: "no-terminal" };
   if (iterm.startsWith("error:")) return { ok: false, reason: "error", detail: iterm.slice(6) };
@@ -146,14 +238,22 @@ async function focusTmuxPane(pane: TmuxPane, snapshot: TmuxSnapshot): Promise<Fo
 
   for (const client of onSession) {
     const raised = await focusEmulatorTab(normalizeTty(client.tty) ?? client.tty);
-    if (raised.ok) return { ok: true, app: raised.app, via: "tmux", tmux: label };
+    // An app-level raise is reported as such: the pane is selected, but the window
+    // hosting the client was picked by the OS, not by us.
+    if (raised.ok) {
+      return { ok: true, app: raised.app, via: raised.via === "app" ? "app" : "tmux", tmux: label };
+    }
   }
 
   if (onSession.length > 0) {
+    const owners = onSession.map((c) => {
+      const app = appForTty(normalizeTty(c.tty) ?? c.tty);
+      return app ? `${c.tty} (${app.name})` : c.tty;
+    });
     return {
       ok: false,
       reason: "tmux-client-unreachable",
-      detail: `attached on ${onSession.map((c) => c.tty).join(", ")}, which no local terminal owns`,
+      detail: `attached on ${owners.join(", ")}, which could not be raised`,
       tmux: label,
       attachCommand: command,
     };
