@@ -116,6 +116,14 @@ and drives iTerm2 via AppleScript with Terminal.app as a fallback.
 macOS may ask for Automation permission the first time. Sessions with no recorded TTY —
 background and daemon-spawned ones — don't show the button.
 
+Terminals that ship no AppleScript dictionary can't be searched by tty at all — Alacritty,
+kitty, WezTerm and VS Code's integrated terminal are all invisible to the lookup above. For
+those the owning application is found by walking the tty's process ancestry to its `.app`
+bundle and raised with `open -a`. That reaches the right app but not the right window, since
+those terminals expose no way to pick one, so the jump says which app it raised and leaves you
+to glance at the front window. Ancestry is matched against the resolved executable path, so a
+terminal launched through a Homebrew symlink still resolves to its bundle.
+
 ### tmux
 
 A session running inside tmux records the tty of its **pane**, and no terminal emulator owns
@@ -132,7 +140,7 @@ Where the jump goes from there depends on what is attached:
 
 | Attach state | What ⇥ does |
 | --- | --- |
-| A client is on that tmux session | `select-window` + `select-pane`, then focuses the tab that owns the client — a real one-click jump |
+| A client is on that tmux session | `select-window` + `select-pane`, then focuses the tab that owns the client — a real one-click jump, or an app-level raise if that terminal isn't scriptable |
 | Nothing is attached to the server | Opens a new terminal window running `tmux attach` |
 | A client is attached, but to a different session | Reports where your terminal is and offers the attach as a second click — it will not `switch-client` a terminal out from under you |
 
