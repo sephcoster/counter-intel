@@ -7,7 +7,7 @@ import { indexAll } from "./indexer.js";
 import { ingestHookEvents } from "./ingest.js";
 import { listSessions, getSession } from "./status.js";
 import { clearRepoCache } from "./git.js";
-import { focusTty } from "./focus.js";
+import { focusTty, attachTmuxPane } from "./focus.js";
 import {
   runOnce, openFindings, startScheduler, restartScheduler,
   dismissFinding, dismissUnactionable, nudgeFinding,
@@ -43,6 +43,14 @@ app.post("/api/sessions/:id/focus", async (req, reply) => {
   const detail = getSession(id);
   if (!detail) return reply.code(404).send({ error: "unknown session" });
   const result = await focusTty(detail.tty);
+  return reply.code(result.ok ? 200 : 409).send(result);
+});
+
+app.post("/api/sessions/:id/tmux-attach", async (req, reply) => {
+  const { id } = req.params as { id: string };
+  const detail = getSession(id);
+  if (!detail) return reply.code(404).send({ error: "unknown session" });
+  const result = await attachTmuxPane(detail.tty);
   return reply.code(result.ok ? 200 : 409).send(result);
 });
 

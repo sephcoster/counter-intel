@@ -22,6 +22,8 @@ interface Finding {
   projectName: string;
   status: string;
   canFocus: boolean;
+  nudgeable: boolean;
+  tmux: string | null;
   actionable: boolean;
   nudgeText: string | null;
   signals: Signal[];
@@ -64,6 +66,7 @@ const OUTCOME_TONE: Record<string, string> = {
   "skipped-busy": "skip",
   "skipped-busy-unknown": "skip",
   "skipped-no-tty": "skip",
+  "skipped-tmux": "skip",
   failed: "bad",
   "not-found": "bad",
   "no-terminal": "bad",
@@ -136,6 +139,8 @@ export function SupervisorPanel({ onClose, onOpenSession }: Props) {
       const body = await res.json().catch(() => ({}));
       if (body.outcome) setNote(`${label}: ${body.outcome}${body.detail ? ` — ${body.detail}` : ""}`);
       else if (typeof body.dismissed === "number") setNote(`Dismissed ${body.dismissed}`);
+      else if (body.ok === false) setNote(`${label}: ${body.reason}${body.detail ? ` — ${body.detail}` : ""}`);
+      else if (body.via === "tmux-attach") setNote(`${label}: attached ${body.tmux} in a new ${body.app} window`);
       await load();
     } catch (err) {
       setNote(err instanceof Error ? err.message : String(err));
@@ -256,10 +261,15 @@ export function SupervisorPanel({ onClose, onOpenSession }: Props) {
                   disabled={busy}
                   onClick={() => void act(`/api/sessions/${f.sessionId}/focus`, "focus")}
                 >
-                  Jump to tab
+                  {f.tmux ? "Jump to tmux" : "Jump to tab"}
                 </button>
               )}
-              {f.nudgeText && f.actionable && (
+              {f.nudgeText && f.actionable && !f.nudgeable && f.tmux && (
+                <span className="muted small" title="No busy interlock exists for a tmux pane">
+                  no nudge in tmux
+                </span>
+              )}
+              {f.nudgeText && f.nudgeable && (
                 <button
                   className="primary"
                   disabled={busy}

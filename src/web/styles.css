@@ -251,6 +251,11 @@ body {
 }
 .badge.worktree { background: rgba(139, 91, 255, 0.15); color: #b18bff; }
 .badge.mode { background: rgba(255, 179, 64, 0.13); color: var(--waiting); }
+.badge.tmux {
+  background: rgba(79, 209, 197, 0.13); color: #4fd1c5;
+  font-family: var(--mono); text-transform: none; letter-spacing: 0;
+}
+.badge.tmux.detached { background: var(--bg-hover); color: var(--text-faint); }
 
 .path { font-family: var(--mono); font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

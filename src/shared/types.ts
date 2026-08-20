@@ -11,6 +11,15 @@ export interface SessionRef {
   label: string;
 }
 
+export interface TmuxLocation {
+  session: string;
+  label: string;
+  paneId: string;
+  /** A tmux client is attached to this pane's session, so a terminal is showing it. */
+  attached: boolean;
+  attachCommand: string;
+}
+
 export interface SessionSummary {
   sessionId: string;
   title: string | null;
@@ -23,6 +32,11 @@ export interface SessionSummary {
   statusSource: "hook" | "process" | "mtime";
   pid: number | null;
   tty: string | null;
+  /**
+   * Set when the session's tty is a tmux pane rather than an emulator tab. The tab
+   * that owns the pane belongs to the tmux *client*, so focusing goes through tmux.
+   */
+  tmux: TmuxLocation | null;
   canFocus: boolean;
   /**
    * True when a claude process for this session is currently running. This is the
