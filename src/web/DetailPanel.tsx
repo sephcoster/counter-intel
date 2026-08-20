@@ -12,8 +12,15 @@ type Tab = "activity" | "files" | "events";
 
 export function DetailPanel({ detail: d, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("activity");
-  const { state: focusState, message: focusMessage, focus } = useFocus();
+  const { state: focusState, message: focusMessage, attachCommand, focus, attach } = useFocus();
   const resumeCmd = `cd ${d.cwd ?? "."} && claude --resume ${d.sessionId}`;
+  const tmux = d.tmux;
+  const jumpText = tmux && !tmux.attached ? "⇥ Attach tmux session" : "⇥ Jump to tab";
+  const jumpTitle = tmux
+    ? tmux.attached
+      ? `Focus the terminal showing tmux ${tmux.label}`
+      : `Attach tmux ${tmux.label} in a new terminal window`
+    : `Focus ${d.tty}`;
 
   return (
     <aside className="drawer">
@@ -39,6 +46,7 @@ export function DetailPanel({ detail: d, onClose }: Props) {
         <Fact label="Messages" value={`${d.messageCount} (${d.userMessageCount} prompts)`} />
         <Fact label="Status" value={`${d.status} · via ${d.statusSource}`} />
         <Fact label="PID / TTY" value={d.pid ? `${d.pid}${d.tty ? ` · ${d.tty}` : ""}` : "not running"} />
+        {tmux && <Fact label="tmux" value={`${tmux.label} · ${tmux.attached ? "attached" : "detached"}`} mono />}
         <Fact label="Started" value={relativeTime(d.createdAt)} />
         <Fact label="Last activity" value={relativeTime(d.updatedAt)} />
       </div>
@@ -65,13 +73,28 @@ export function DetailPanel({ detail: d, onClose }: Props) {
           className={`primary jump-${focusState}`}
           disabled={!d.canFocus || focusState === "working"}
           onClick={() => void focus(d.sessionId)}
-          title={d.canFocus ? `Focus ${d.tty}` : "No terminal recorded for this session yet"}
+          title={d.canFocus ? jumpTitle : "No terminal recorded for this session yet"}
         >
-          {focusState === "ok" ? "✓ Focused" : focusState === "working" ? "Jumping…" : "⇥ Jump to tab"}
+          {focusState === "ok" ? "✓ Focused" : focusState === "working" ? "Jumping…" : jumpText}
         </button>
+        {tmux && !tmux.attached && (
+          <button disabled={focusState === "working"} onClick={() => void attach(d.sessionId)}>
+            Attach in new window
+          </button>
+        )}
+        {tmux && (
+          <button onClick={() => void navigator.clipboard.writeText(tmux.attachCommand)}>
+            Copy attach command
+          </button>
+        )}
         <button onClick={() => void navigator.clipboard.writeText(resumeCmd)}>Copy resume command</button>
       </div>
       {focusMessage && <div className="drawer-note">{focusMessage}</div>}
+      {attachCommand && (
+        <div className="drawer-note">
+          <code>{attachCommand}</code>
+        </div>
+      )}
 
       <div className="resume">
         <code>{resumeCmd}</code>

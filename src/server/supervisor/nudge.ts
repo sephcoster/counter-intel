@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { db } from "../db.js";
 import { getSession } from "../status.js";
 import { normalizeTty } from "../focus.js";
+import { tmuxSnapshot, paneLabel } from "../tmux.js";
 import type { SupervisorConfig } from "./config.js";
 
 const run = promisify(execFile);
@@ -13,6 +14,7 @@ export type NudgeOutcome =
   | "skipped-status"
   | "skipped-rate-limit"
   | "skipped-no-tty"
+  | "skipped-tmux"
   | "skipped-busy"
   | "skipped-busy-unknown"
   | "not-found"
@@ -96,6 +98,20 @@ export async function sendNudge(
   const tty = normalizeTty(session.tty);
   if (!tty) {
     return audit(sessionId, findingId, text, "skipped-no-tty", null, session.status, null);
+  }
+
+  // The busy interlock is iTerm's `is processing`, read inside the same AppleScript
+  // as the write. A tmux pane exposes nothing equivalent — `pane_current_command`
+  // reads `node` whether Claude is idle, thinking, or sitting at a permission prompt
+  // — so `send-keys` would be a write with no interlock at all, and a nudge landing
+  // on a prompt would answer it. Nudging tmux panes stays off until there's a real
+  // readiness signal to gate on.
+  const pane = tmuxSnapshot().byTty.get(tty);
+  if (pane) {
+    return audit(
+      sessionId, findingId, text, "skipped-tmux",
+      `pane ${paneLabel(pane)} — no busy interlock available`, session.status, tty,
+    );
   }
 
   const previous = lastSent.get(sessionId) as { created_at: string } | undefined;

@@ -99,6 +99,8 @@ src/server/
   live.ts      process discovery, cwd via lsof
   git.ts       worktree detection
   ingest.ts    reads the hook event log
+  focus.ts     jump to a tab, or through tmux when the tty is a pane
+  tmux.ts      pane and client discovery across tmux sockets
 hooks/         the script install-hook copies into ~/.claude/hooks/
 ```
 
@@ -113,6 +115,38 @@ and drives iTerm2 via AppleScript with Terminal.app as a fallback.
 
 macOS may ask for Automation permission the first time. Sessions with no recorded TTY —
 background and daemon-spawned ones — don't show the button.
+
+### tmux
+
+A session running inside tmux records the tty of its **pane**, and no terminal emulator owns
+that — the tab belongs to the tmux *client*, not the pane. So the tty lookup that works for a
+plain tab finds nothing, and the jump has to go through tmux instead.
+
+Panes are discovered with one `tmux list-panes -a` per socket, across every socket in
+`$TMUX_TMPDIR` (so `tmux -L` servers are covered, not just the default one). A session whose
+tty matches a pane is badged `tmux <session>:<window>.<pane>` on its card, and the pane is made
+current before anything else happens — so however you end up there, you land on the pane rather
+than wherever the session was last left.
+
+Where the jump goes from there depends on what is attached:
+
+| Attach state | What ⇥ does |
+| --- | --- |
+| A client is on that tmux session | `select-window` + `select-pane`, then focuses the tab that owns the client — a real one-click jump |
+| Nothing is attached to the server | Opens a new terminal window running `tmux attach` |
+| A client is attached, but to a different session | Reports where your terminal is and offers the attach as a second click — it will not `switch-client` a terminal out from under you |
+
+The drawer also carries **Copy attach command** for the times you'd rather do it by hand. That
+command targets the pane id (`tmux -S /tmp/tmux-<uid>/default attach -t %23`), which resolves to
+its own session, so no session name — nothing free-text at all — ever reaches a shell string.
+The socket stays explicit even when it's the default one, since the shell you paste into may
+resolve `$TMUX_TMPDIR` differently than the server did.
+
+Panes are re-resolved at click time rather than trusted from the last poll, since they move.
+
+Pane discovery is plain `tmux`, so it works wherever tmux does; raising a tab and opening a
+window are the same AppleScript path as above, so off macOS the jump reports an error and
+**Copy attach command** is the way through.
 
 ## Supervisor
 
@@ -184,6 +218,13 @@ would answer it:
 - session state is re-read at send time, not trusted from the scan
 - per-session rate limit and a per-run ceiling
 - every attempt is recorded in `nudges` with its outcome
+
+**tmux panes are never nudged.** The interlock above is iTerm's `is processing`, read inside
+the same AppleScript as the write. tmux exposes nothing equivalent — `pane_current_command`
+reads `node` whether Claude is idle, thinking, or sitting at a permission prompt — so
+`send-keys` would be a write with no interlock at all, and a nudge landing on a prompt answers
+it. Those findings still appear and can still be jumped to; the attempt is recorded as
+`skipped-tmux` rather than failing silently.
 
 The daemon calls `osascript` as an ordinary process, so this needs no Claude permission grant.
 Adding `Bash(osascript:*)` to `~/.claude/settings.json` would grant broad GUI automation to

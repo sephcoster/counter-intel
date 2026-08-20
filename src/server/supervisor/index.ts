@@ -153,8 +153,14 @@ export interface StuckEntry {
   projectName: string;
   status: string;
   canFocus: boolean;
-  /** False when there is no terminal to nudge — the session is gone or never had a tty. */
+  /** False when there is no terminal at all — the session is gone or never had a tty. */
   actionable: boolean;
+  /**
+   * Narrower than `actionable`: a tmux pane has a terminal and can be jumped to, but
+   * offers no busy interlock to gate a write on, so it is never nudged.
+   */
+  nudgeable: boolean;
+  tmux: string | null;
   nudgeText: string | null;
   signals: Array<{ key: string; severity: string; summary: string }>;
   verdict: Verdict | null;
@@ -185,6 +191,8 @@ export function openFindings(): StuckEntry[] {
       status: session?.status ?? "unknown",
       canFocus: session?.canFocus ?? false,
       actionable: Boolean(session?.tty) && session?.status !== "ended",
+      nudgeable: Boolean(session?.tty) && !session?.tmux && session?.status !== "ended",
+      tmux: session?.tmux?.label ?? null,
       nudgeText: (r.nudge_text as string | null) ?? null,
       signals: safeParse(r.signals) ?? [],
       verdict: safeParse(r.verdict),

@@ -18,6 +18,11 @@ export function SessionCard({ session: s, active, onClick }: Props) {
   const title = s.title ?? s.firstPrompt ?? "(untitled session)";
   const tone = contextTone(s.contextPct);
   const { state, message, focus } = useFocus();
+  const jumpLabel = s.tmux
+    ? s.tmux.attached
+      ? `Jump to tmux ${s.tmux.label}`
+      : `Attach tmux ${s.tmux.label} in a new window`
+    : `Jump to ${s.tty}`;
 
   return (
     <div
@@ -38,7 +43,7 @@ export function SessionCard({ session: s, active, onClick }: Props) {
         {s.canFocus && (
           <button
             className={`jump jump-${state}`}
-            title={message ?? `Jump to ${s.tty}`}
+            title={message ?? jumpLabel}
             onClick={(e) => {
               e.stopPropagation();
               void focus(s.sessionId);
@@ -55,6 +60,19 @@ export function SessionCard({ session: s, active, onClick }: Props) {
         </span>
         {s.gitBranch && <span className="branch">{s.gitBranch}</span>}
         {s.isWorktree && <span className="badge worktree">worktree</span>}
+        {s.tmux && (
+          <span
+            className={`badge tmux${s.tmux.attached ? "" : " detached"}`}
+            title={
+              s.tmux.attached
+                ? `tmux pane ${s.tmux.paneId}, attached`
+                : `tmux pane ${s.tmux.paneId} — no terminal is showing it`
+            }
+          >
+            tmux {s.tmux.label}
+            {s.tmux.attached ? "" : " · detached"}
+          </span>
+        )}
         {s.isLive && !s.canFocus && <span className="badge dead">no tab</span>}
         {s.permissionMode && s.permissionMode !== "default" && (
           <span className="badge mode">{s.permissionMode}</span>

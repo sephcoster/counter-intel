@@ -3,7 +3,8 @@ import { repoInfo, projectName } from "./git.js";
 import { liveProcesses, explicitSessionId, type LiveProc } from "./live.js";
 import { contextWindowFor } from "./parse.js";
 import { normalizeTty } from "./focus.js";
-import type { SessionDetail, SessionStatus, SessionSummary, SessionRef } from "../shared/types.js";
+import { tmuxSnapshot, paneLabel, attachCommand } from "./tmux.js";
+import type { SessionDetail, SessionStatus, SessionSummary, SessionRef, TmuxLocation } from "../shared/types.js";
 
 const WORKING_EVENTS = new Set([
   "UserPromptSubmit", "SessionStart", "SubagentStart", "PreCompact", "PostToolUseFailure",
@@ -112,6 +113,7 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
 
   const events = latestEvents();
   const procs = liveProcesses();
+  const tmux = tmuxSnapshot();
   const claimed = new Set<number>();
   const refs = refsFor(rows.map((r) => String(r.session_id)));
   const now = Date.now();
@@ -128,6 +130,16 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
     const contextTokens = Number(row.context_tokens ?? 0);
     const model = (row.model as string | null) ?? null;
     const tty = normalizeTty(proc?.tty ?? event?.tty ?? null);
+    const pane = tty ? tmux.byTty.get(tty) : undefined;
+    const tmuxLocation: TmuxLocation | null = pane
+      ? {
+          session: pane.session,
+          label: paneLabel(pane),
+          paneId: pane.paneId,
+          attached: pane.sessionAttached,
+          attachCommand: attachCommand(pane),
+        }
+      : null;
     const contextWindow = contextWindowFor(model, contextTokens);
 
     return {
@@ -142,6 +154,7 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
       statusSource: source,
       pid: proc?.pid ?? event?.pid ?? null,
       tty,
+      tmux: tmuxLocation,
       // Keyed off a matched running process, not off the hook's last-known pid,
       // which outlives the process it referred to.
       isLive: proc !== null && status !== "ended",
