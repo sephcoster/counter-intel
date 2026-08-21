@@ -7,6 +7,7 @@ import { indexAll } from "./indexer.js";
 import { ingestHookEvents } from "./ingest.js";
 import { listSessions, getSession } from "./status.js";
 import { clearRepoCache } from "./git.js";
+import { refsNeedReindex } from "./db.js";
 import { focusTty, attachTmuxPane } from "./focus.js";
 import {
   runOnce, openFindings, startScheduler, restartScheduler,
@@ -104,7 +105,7 @@ if (existsSync(webDist)) {
   });
 }
 
-const boot = indexAll();
+const boot = indexAll(refsNeedReindex);
 console.log(
   `[counter-intel] indexed ${boot.updated}/${boot.scanned} transcripts ` +
     `(${(boot.bytesRead / 1024 / 1024).toFixed(1)} MB) in ${boot.ms}ms`,

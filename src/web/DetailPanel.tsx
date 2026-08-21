@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { SessionDetail } from "../shared/types.js";
+import type { SessionDetail, SessionRef } from "../shared/types.js";
 import { compactTokens, linearUrl, prUrl, relativeTime, shortenPath } from "./format.js";
 import { useFocus } from "./useFocus.js";
 
@@ -10,8 +10,21 @@ interface Props {
 
 type Tab = "activity" | "files" | "events";
 
+// Refs arrive strongest-first, so the ones past this are the weakest — mentions the session
+// happened to see rather than anything it is working on.
+const REF_LIMIT = 12;
+
+const REF_SOURCE_LABEL: Record<SessionRef["source"], string> = {
+  prompt: "you named this in a prompt",
+  created: "this session created it",
+  branch: "named in the git branch",
+  prose: "discussed in the session",
+  tool: "seen in tool output",
+};
+
 export function DetailPanel({ detail: d, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("activity");
+  const [showAllRefs, setShowAllRefs] = useState(false);
   const { state: focusState, message: focusMessage, attachCommand, focus, attach } = useFocus();
   const resumeCmd = `cd ${d.cwd ?? "."} && claude --resume ${d.sessionId}`;
   const tmux = d.tmux;
@@ -53,18 +66,24 @@ export function DetailPanel({ detail: d, onClose }: Props) {
 
       {d.refs.length > 0 && (
         <div className="drawer-refs">
-          {d.refs.map((r) => (
+          {(showAllRefs ? d.refs : d.refs.slice(0, REF_LIMIT)).map((r) => (
             <a
               key={`${r.kind}:${r.value}`}
-              className={`chip chip-${r.kind}`}
+              className={`chip chip-${r.kind} src-${r.source}`}
               href={r.kind === "pr" ? prUrl(r.value) : linearUrl(r.value)}
               target="_blank"
               rel="noreferrer"
+              title={REF_SOURCE_LABEL[r.source]}
             >
               {r.kind === "pr" ? "PR " : ""}
               {r.value}
             </a>
           ))}
+          {d.refs.length > REF_LIMIT && (
+            <button className="link-btn" onClick={() => setShowAllRefs(!showAllRefs)}>
+              {showAllRefs ? "show fewer" : `+${d.refs.length - REF_LIMIT} more`}
+            </button>
+          )}
         </div>
       )}
 

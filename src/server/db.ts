@@ -123,14 +123,21 @@ CREATE TABLE IF NOT EXISTS supervisor_runs (
 );
 `);
 
-function addColumn(table: string, column: string, definition: string): void {
+function addColumn(table: string, column: string, definition: string): boolean {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (cols.some((c) => c.name === column)) return;
+  if (cols.some((c) => c.name === column)) return false;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  return true;
 }
 
 addColumn("findings", "nudge_text", "TEXT");
 addColumn("findings", "dismissed_at", "TEXT");
+
+/**
+ * Where a ref came from can't be recovered from rows already stored, so gaining the column
+ * means the transcripts have to be re-read once. The server checks this on boot.
+ */
+export const refsNeedReindex = addColumn("session_refs", "source_rank", "INTEGER");
 
 export function resetIncrementalCursors(): void {
   db.prepare("UPDATE sessions SET bytes_read = 0").run();

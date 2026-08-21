@@ -5,10 +5,17 @@ export type SessionStatus =
   | "idle"
   | "ended";
 
+export type RefSource = "prompt" | "created" | "branch" | "prose" | "tool";
+
 export interface SessionRef {
   kind: "pr" | "linear" | "url";
   value: string;
   label: string;
+  /**
+   * How the ref reached the session, strongest first. Refs are ordered by this, so a
+   * truncated list keeps the ones you named and the ones the session created.
+   */
+  source: RefSource;
 }
 
 export interface TmuxLocation {
