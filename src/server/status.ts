@@ -1,7 +1,7 @@
 import { db } from "./db.js";
 import { repoInfo, projectName } from "./git.js";
 import { liveProcesses, explicitSessionId, type LiveProc } from "./live.js";
-import { contextWindowFor } from "./parse.js";
+import { contextWindowFor, refSourceFor } from "./parse.js";
 import { normalizeTty } from "./focus.js";
 import { tmuxSnapshot, paneLabel, attachCommand } from "./tmux.js";
 import type { SessionDetail, SessionStatus, SessionSummary, SessionRef, TmuxLocation } from "../shared/types.js";
@@ -40,16 +40,23 @@ function refsFor(sessionIds: string[]): Map<string, SessionRef[]> {
   const placeholders = sessionIds.map(() => "?").join(",");
   const rows = db
     .prepare(
-      `SELECT session_id, kind, value FROM session_refs
-       WHERE session_id IN (${placeholders}) ORDER BY kind, value`,
+      `SELECT session_id, kind, value, source_rank FROM session_refs
+       WHERE session_id IN (${placeholders})
+       ORDER BY COALESCE(source_rank, 4), kind, value`,
     )
-    .all(...sessionIds) as Array<{ session_id: string; kind: string; value: string }>;
+    .all(...sessionIds) as Array<{
+      session_id: string;
+      kind: string;
+      value: string;
+      source_rank: number | null;
+    }>;
   for (const r of rows) {
     const list = out.get(r.session_id) ?? [];
     list.push({
       kind: r.kind as SessionRef["kind"],
       value: r.value,
       label: r.kind === "pr" ? `#${r.value.split("#")[1]}` : r.value,
+      source: refSourceFor(r.source_rank ?? 4),
     });
     out.set(r.session_id, list);
   }

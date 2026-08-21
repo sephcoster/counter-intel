@@ -257,6 +257,10 @@ body {
 }
 .badge.tmux.detached { background: var(--bg-hover); color: var(--text-faint); }
 
+/* Weakly-sourced refs are dimmed so a long list reads as a tail, not a peer group. */
+.chip.src-prose { opacity: 0.75; }
+.chip.src-tool { opacity: 0.55; }
+
 .path { font-family: var(--mono); font-size: 11px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .last-prompt {

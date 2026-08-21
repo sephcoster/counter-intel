@@ -85,6 +85,36 @@ exactly like ticket references. Declare your team keys to disambiguate, in
 { "linearPrefixes": ["ENG", "PLATFORM"] }
 ```
 
+### What counts as a ref
+
+Refs record what a session is *working on*, which is not the same as every identifier that
+scrolled past it. The distinction matters more than it sounds: one `gh pr list` prints dozens
+of PRs, `mcp__…Linear__list_issues` prints a page of tickets, `git log` prints whatever the
+commit messages mention, and none of that is the session's work. Measured across 61
+transcripts, a single-prompt session that asked "summarize my closed PRs" had picked up **60
+PR refs, every one of them from tool output** — and across another session's 604 ticket
+matches, exactly one came from text a human typed.
+
+So each ref carries where it came from, strongest first:
+
+| Source | Kept when |
+| --- | --- |
+| `prompt` | You named it. Never filtered — pasting twenty keys is deliberate |
+| `created` | The session made it: `gh pr create`, `gh issue create`, a Linear write tool |
+| `branch` | The git branch names it (`stefan/all-2775-…` → `ALL-2775`) |
+| `prose` | You or the model discussed it, in a message mentioning ≤6 refs |
+| `tool` | Tool output naming ≤2 refs — `gh pr view`, `get_issue`, not enumeration |
+
+The two caps are what separate discussion from enumeration, and both cuts land in empty space
+rather than mid-cluster. Of 90 `gh pr create` calls, every single one printed exactly **one**
+PR url, while listing commands printed up to 60 — so nothing a session creates is ever lost to
+the tool cap. And of 509 prose messages that mention anything, 98.6% mention six or fewer,
+with nothing at all between 11 and 20.
+
+Together this cuts stored refs by ~58% (1117 → 470 locally) while keeping every PR the agent
+opened. The drawer then shows the first 12 and collapses the rest behind **+N more** — safe to
+truncate precisely because the ordering puts what you named and what the session built on top.
+
 The default is `[]`, which uses heuristics instead — hex fragments from UUIDs and commit SHAs
 are dropped, along with known standards like `ISO-8601` and DeepSource codes like `JS-0045`.
 Keys found inside `linear.app/.../issue/...` URLs are always trusted regardless of the list.

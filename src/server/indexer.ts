@@ -134,10 +134,14 @@ ON CONFLICT(session_id) DO UPDATE SET
   file_size       = excluded.file_size
 `);
 
+// Incremental passes re-see the same ref from weaker sources, so the rank only ever
+// narrows — a ref you named in a prompt must not decay to `tool` on the next append.
 const upsertRef = db.prepare(`
-INSERT INTO session_refs (session_id, kind, value, last_seen)
-VALUES (?, ?, ?, ?)
-ON CONFLICT(session_id, kind, value) DO UPDATE SET last_seen = COALESCE(excluded.last_seen, session_refs.last_seen)
+INSERT INTO session_refs (session_id, kind, value, last_seen, source_rank)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(session_id, kind, value) DO UPDATE SET
+  last_seen   = COALESCE(excluded.last_seen, session_refs.last_seen),
+  source_rank = MIN(COALESCE(session_refs.source_rank, excluded.source_rank), excluded.source_rank)
 `);
 
 const upsertFile = db.prepare(`
@@ -186,7 +190,9 @@ const persist = db.transaction((t: Transcript, acc: Accumulator, bytesRead: numb
     file_mtime: Math.floor(t.mtimeMs),
     file_size: t.size,
   });
-  for (const ref of acc.refs.values()) upsertRef.run(t.sessionId, ref.kind, ref.value, ref.lastSeen);
+  for (const ref of acc.refs.values()) {
+    upsertRef.run(t.sessionId, ref.kind, ref.value, ref.lastSeen, ref.rank);
+  }
   for (const [path, f] of acc.files) upsertFile.run(t.sessionId, path, f.count, f.lastSeen);
   let seq = acc.seq - acc.turns.length;
   for (const turn of acc.turns) upsertTurn.run(t.sessionId, turn.uuid, turn.ts, seq++, turn.role, turn.text);
