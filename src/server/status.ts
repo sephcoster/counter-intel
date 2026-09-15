@@ -63,13 +63,15 @@ function refsFor(sessionIds: string[]): Map<string, SessionRef[]> {
   return out;
 }
 
-function matchProcess(
+export function matchProcess(
   row: Record<string, unknown>,
   event: LatestEvent | undefined,
   procs: LiveProc[],
   claimed: Set<number>,
 ): LiveProc | null {
-  const explicit = procs.find((p) => explicitSessionId(p.command) === row.session_id);
+  procs = procs.filter((p) => p.provider === (row.provider ?? "claude"));
+  const explicit = procs.find((p) => p.sessionIds.includes(String(row.session_id)) ||
+    (p.sessionIds.length === 0 && explicitSessionId(p.command, p.provider) === row.session_id));
   if (explicit) return explicit;
 
   if (event?.pid) {
@@ -79,12 +81,15 @@ function matchProcess(
 
   const cwd = row.cwd as string | null;
   if (!cwd) return null;
-  const candidates = procs.filter((p) => p.cwd === cwd && !claimed.has(p.pid));
+  const candidates = procs.filter((p) => p.cwd === cwd && !claimed.has(p.pid) &&
+    p.sessionIds.length === 0 && !explicitSessionId(p.command, p.provider) &&
+    // App servers host many threads: cwd alone cannot identify any of them.
+    !(p.provider === "codex" && /\bapp-server\b/.test(p.command)));
   if (candidates.length === 0) return null;
   return candidates[0] ?? null;
 }
 
-function deriveStatus(
+export function deriveStatus(
   row: Record<string, unknown>,
   event: LatestEvent | undefined,
   proc: LiveProc | null,
@@ -92,6 +97,14 @@ function deriveStatus(
 ): { status: SessionStatus; source: SessionSummary["statusSource"] } {
   const mtime = Number(row.file_mtime ?? 0);
   const recentlyTouched = now - mtime < ACTIVE_MS;
+
+  if (row.provider === "codex") {
+    if (!proc) return { status: "idle", source: "process" };
+    if (["working", "waiting", "blocked"].includes(String(row.transcript_status))) {
+      return { status: row.transcript_status as SessionStatus, source: "transcript" };
+    }
+    return { status: recentlyTouched ? "working" : "waiting", source: "process" };
+  }
 
   if (event) {
     const age = now - Date.parse(event.ts);
@@ -127,7 +140,8 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
 
   return rows.map((row) => {
     const sessionId = String(row.session_id);
-    const event = events.get(sessionId);
+    const provider = row.provider === "codex" ? "codex" : "claude";
+    const event = provider === "claude" ? events.get(sessionId) : undefined;
     const proc = matchProcess(row, event, procs, claimed);
     if (proc) claimed.add(proc.pid);
 
@@ -147,10 +161,11 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
           attachCommand: attachCommand(pane),
         }
       : null;
-    const contextWindow = contextWindowFor(model, contextTokens);
+    const contextWindow = provider === "codex" ? Number(row.context_window ?? 0) : contextWindowFor(model, contextTokens);
 
     return {
       sessionId,
+      provider,
       title: (row.title as string | null) ?? null,
       cwd,
       projectName: projectName(cwd, String(row.project_dir)),
@@ -213,7 +228,9 @@ export function getSession(sessionId: string): SessionDetail | null {
     )
     .all(sessionId) as SessionDetail["files"];
 
-  const recentEvents = db
+  const recentEvents = summary.provider === "codex" ? db
+    .prepare("SELECT event, ts, cwd FROM transcript_events WHERE session_id = ? ORDER BY id DESC LIMIT 25")
+    .all(sessionId) as SessionDetail["recentEvents"] : db
     .prepare("SELECT event, ts, cwd FROM hook_events WHERE session_id = ? ORDER BY id DESC LIMIT 25")
     .all(sessionId) as SessionDetail["recentEvents"];
 

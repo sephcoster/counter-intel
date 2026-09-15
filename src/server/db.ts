@@ -132,6 +132,19 @@ function addColumn(table: string, column: string, definition: string): boolean {
 
 addColumn("findings", "nudge_text", "TEXT");
 addColumn("findings", "dismissed_at", "TEXT");
+addColumn("sessions", "provider", "TEXT NOT NULL DEFAULT 'claude'");
+addColumn("sessions", "context_window", "INTEGER NOT NULL DEFAULT 0");
+addColumn("sessions", "transcript_status", "TEXT");
+addColumn("sessions", "parser_state", "TEXT");
+
+db.exec(`CREATE TABLE IF NOT EXISTS transcript_events (
+  session_id TEXT NOT NULL,
+  id INTEGER NOT NULL,
+  event TEXT NOT NULL,
+  ts TEXT,
+  cwd TEXT,
+  PRIMARY KEY (session_id, id)
+)`);
 
 /**
  * Where a ref came from can't be recovered from rows already stored, so gaining the column

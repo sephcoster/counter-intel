@@ -1,3 +1,5 @@
+export type SessionProvider = "claude" | "codex";
+
 export type SessionStatus =
   | "working"
   | "waiting"
@@ -29,6 +31,7 @@ export interface TmuxLocation {
 
 export interface SessionSummary {
   sessionId: string;
+  provider: SessionProvider;
   title: string | null;
   cwd: string | null;
   projectName: string;
@@ -36,7 +39,7 @@ export interface SessionSummary {
   isWorktree: boolean;
   worktreeOf: string | null;
   status: SessionStatus;
-  statusSource: "hook" | "process" | "mtime";
+  statusSource: "hook" | "transcript" | "process" | "mtime";
   pid: number | null;
   tty: string | null;
   /**
@@ -46,7 +49,7 @@ export interface SessionSummary {
   tmux: TmuxLocation | null;
   canFocus: boolean;
   /**
-   * True when a claude process for this session is currently running. This is the
+   * True when an agent process for this session is currently running. This is the
    * only dependable "open in a tab" signal — `/clear` reuses the session id, file
    * and process, so it leaves nothing to distinguish it from an ordinary message.
    */

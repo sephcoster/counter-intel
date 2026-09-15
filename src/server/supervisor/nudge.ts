@@ -12,6 +12,7 @@ export type NudgeOutcome =
   | "sent"
   | "dry-run"
   | "skipped-status"
+  | "skipped-provider"
   | "skipped-rate-limit"
   | "skipped-no-tty"
   | "skipped-tmux"
@@ -87,6 +88,11 @@ export async function sendNudge(
   // Re-read state at the moment of sending rather than trusting the scan.
   const session = getSession(sessionId);
   if (!session) return audit(sessionId, findingId, text, "not-found", "unknown session", null, null);
+
+  if (session.provider === "codex") {
+    return audit(sessionId, findingId, text, "skipped-provider",
+      "Codex monitoring only; terminal nudge readiness is not verified", session.status, session.tty);
+  }
 
   if (!config.nudgeableStatuses.includes(session.status)) {
     return audit(

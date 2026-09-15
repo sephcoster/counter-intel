@@ -23,7 +23,7 @@ export interface TriageResult {
 }
 
 // Kept byte-identical across calls so the harness prefix stays cache-warm.
-const SYSTEM_PROMPT = `You triage stalled software engineering sessions. You receive a JSON digest of one Claude Code session plus deterministic signals about its branch and pull request.
+const SYSTEM_PROMPT = `You triage stalled software engineering sessions. You receive a JSON digest of one coding agent session plus deterministic signals about its branch and pull request.
 
 Decide whether the session is genuinely stuck and needs a nudge to resume, or whether the signals are expected given what the engineer was doing.
 
@@ -54,6 +54,7 @@ function digestFor(finding: SessionFindings): string {
 
   return JSON.stringify(
     {
+      provider: s.provider,
       title: s.title,
       branch: s.gitBranch,
       path: s.cwd,

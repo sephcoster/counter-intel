@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionDetail, SessionStatus, SessionSummary } from "../shared/types.js";
+import { PROVIDER_LABEL } from "../shared/provider.js";
 import { SessionCard } from "./SessionCard.js";
 import { DetailPanel } from "./DetailPanel.js";
 import { SupervisorPanel } from "./SupervisorPanel.js";
@@ -109,7 +110,7 @@ export function App() {
     (s: SessionSummary) => {
       const q = query.trim().toLowerCase();
       if (!q) return true;
-      return [s.title, s.projectName, s.gitBranch, s.cwd, s.lastPrompt, ...s.refs.map((r) => r.value)]
+      return [PROVIDER_LABEL[s.provider], s.title, s.firstPrompt, s.projectName, s.gitBranch, s.cwd, s.lastPrompt, ...s.refs.map((r) => r.value)]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
     },
@@ -177,7 +178,7 @@ export function App() {
             <input
               ref={searchRef}
               className="search"
-              placeholder="Filter by title, branch, path, PR…"
+              placeholder="Filter by agent, title, branch, path, PR…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {

@@ -1,10 +1,11 @@
 # counter-intel
 
-A local board for the Claude Code sessions running across your terminal tabs. Built for the
+A local board for the Claude Code and Codex sessions running across your terminal tabs. Built for the
 problem of walking away for an hour and losing track of what five or ten agents were doing,
 which ones are blocked on you, and which are about to run out of context.
 
-Everything is read from `~/.claude/` on your own machine. Nothing leaves the box.
+Session monitoring reads `~/.claude/` and `~/.codex/sessions/` on your own machine.
+The optional supervisor uses GitHub and a Claude CLI triage call when enabled.
 
 ```bash
 npm install
@@ -15,14 +16,14 @@ npm run install-hook # optional but recommended — see "Live status"
 ## What it shows
 
 The board is split in two. The main area holds sessions **currently open in a terminal** —
-those with a running `claude` process. Everything else collapses into **Not open in a terminal**
+those with a matched running `claude` or `codex` process. Everything else collapses into **Not open in a terminal**
 at the bottom, expandable when you want the history. The status pills count live sessions only.
 
 A live session with no terminal (daemon- or background-spawned) stays in the main area but is
 badged `no tab`, since it can be genuinely busy — even blocked — while being impossible to jump
 to.
 
-> **`/clear` does not close or archive a session.** It resets the model's context, but the
+> **Claude's `/clear` does not close or archive a session.** It resets the model's context, but the
 > session id, the transcript file, and the OS process all continue — a single transcript can
 > contain several `/clear` records with conversation on both sides of each. So there is nothing
 > in a cleared session that distinguishes it from an ordinary one. "Has a running process" is
@@ -34,17 +35,18 @@ Within each area, sessions are grouped by what they need from you, most urgent f
 | Status | Meaning |
 | --- | --- |
 | **Needs you** | Blocked on a permission prompt or notification |
-| **Waiting on you** | Claude finished its turn and is waiting for input |
+| **Waiting on you** | The agent finished its turn and is waiting for input |
 | **Working** | Actively running |
 | **Idle** | No recent activity |
 | **Ended** | Session closed |
 
-Each card carries the AI-generated title, the working path, git branch, a worktree badge,
+Each card carries an agent label, the title (or first prompt), the working path, git branch, a worktree badge,
 linked PRs and Linear tickets, the most recent prompt, and a context gauge that turns amber
 at 65% and red at 85% so you can see what needs compacting before it bites.
 
 Clicking a card opens the full detail: your prompts separated out from the agentic tool
-churn, files touched, hook event history, and a copyable `claude --resume` command.
+churn, files touched, event history, and a copyable `claude --resume` or `codex resume` command.
+Search for `Codex` or `Claude Code` to filter by agent.
 
 ## How it works
 
@@ -57,7 +59,7 @@ SQLite, tracking a byte offset per file so re-indexing only reads what was appen
 come from `ai-title` records, context from the last assistant message's `usage` block, paths
 and branches from the `cwd`/`gitBranch` fields stamped on every record.
 
-**Hook registry (one command).** `npm run install-hook` appends a small script to eight
+**Claude hook registry (one command).** `npm run install-hook` appends a small script to eight
 existing hook events. This is the only way to get the mapping the transcripts don't record —
 which OS process and TTY belong to which session — and it's what separates "Claude is
 thinking" from "Claude is blocked waiting for you to approve something". Existing hooks are
@@ -67,12 +69,58 @@ preserved and `settings.json` is backed up first. Reverse it with
 Without hooks, status is inferred from process cwd and file mtimes and the board still works;
 it just can't reliably distinguish blocked from busy.
 
+### Codex sessions
+
+Codex support needs no hook installation. The same incremental scanner reads
+`~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. It extracts prompts and assistant text,
+working directory, branch, model, token usage, direct file/patch tool operations, and PR/ticket
+references. Repeated message events and injected instructions are excluded from the activity
+feed. Files accessed indirectly through shell commands or code-mode wrappers are not inferred.
+
+Turn start, completion, and interruption events drive working/waiting status. A direct
+`request_user_input` tool call is shown as blocked until its result arrives. Permission
+approval waits are not reliably recorded, so they can still appear as working. Older rollouts
+without turn events fall back to process activity and file modification time.
+
+Running processes are matched to their open rollout files via `lsof`, then explicit resume
+IDs, with cwd matching as a fallback for standalone CLIs. This keeps Claude and Codex sessions
+in the same project separate. App-server threads are live only when their rollout file can be
+matched; they have no terminal jump button unless a TTY is available. Closed processes move to
+history even if their last transcript event says working.
+
+Local and worktree sessions from the Codex desktop app should be picked up when their
+rollouts are stored in the watched directory. One app-server process can match multiple
+threads. App sessions without a TTY show `no tab`; opening the desktop app to a particular
+thread is not implemented. Cloud and SSH/remote sessions are outside this local scan.
+App-server matching is covered by regression tests, but desktop-app behavior has not yet
+been verified against a running app.
+
+The default location respects `CODEX_HOME`. Override transcript roots when needed:
+
+| Variable | Default |
+| --- | --- |
+| `COUNTER_INTEL_CODEX_SESSIONS` | `$CODEX_HOME/sessions`, or `~/.codex/sessions` |
+| `COUNTER_INTEL_PROJECTS` | `~/.claude/projects` |
+
+Existing SQLite databases gain the new columns automatically; existing sessions remain
+labelled Claude Code. Codex subagent/guardian threads are hidden by default and available via
+`/api/sessions?includeSidechains=1`. Archived Codex transcripts outside the sessions directory
+are not scanned. Supervisor findings can include Codex sessions, but terminal nudges remain
+Claude-only.
+
+The parser follows locally observed rollout formats, which can change between Codex versions.
+The resume action uses the [documented Codex CLI workflow](https://learn.chatgpt.com/docs/codex/cli).
+
 ### Context window
 
-The transcript records the model as `claude-opus-5` even on 1M-context sessions, so the
+For Claude, the transcript records the model as `claude-opus-5` even on 1M-context sessions, so the
 window is inferred from observed usage: anything past 200k is treated as a 1M session.
 Compaction resets the counter, which the indexer follows rather than tracking a high-water
 mark.
+
+For Codex, the gauge uses the reported `model_context_window` and the latest request's input
+tokens. Cached input is already included; cumulative session usage is not used. Until Codex
+reports a window size, the gauge shows `ctx unknown`.
 
 ### Linear tickets
 
@@ -125,6 +173,7 @@ Keys found inside `linear.app/.../issue/...` URLs are always trusted regardless 
 src/server/
   indexer.ts   incremental JSONL -> SQLite
   parse.ts     record accumulator, ref extraction
+  codex.ts     Codex rollout parser and turn events
   status.ts    fuses transcripts + hook events + live processes
   live.ts      process discovery, cwd via lsof
   git.ts       worktree detection
@@ -135,7 +184,9 @@ hooks/         the script install-hook copies into ~/.claude/hooks/
 ```
 
 Subagent transcripts (`<session-id>/subagents/*.jsonl`) are deliberately skipped — they're
-sidechains, not sessions.
+Claude sidechains. Codex marks its sidechains in session metadata instead.
+
+Run `npm test`, `npm run typecheck`, and `npm run build` to validate changes.
 
 ## Jump to tab
 

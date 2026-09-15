@@ -1,4 +1,5 @@
 import type { SessionSummary } from "../shared/types.js";
+import { PROVIDER_LABEL } from "../shared/provider.js";
 import { compactTokens, relativeTime, shortenPath } from "./format.js";
 import { useFocus } from "./useFocus.js";
 
@@ -55,6 +56,7 @@ export function SessionCard({ session: s, active, onClick }: Props) {
       </div>
 
       <div className="card-meta">
+        <span className="badge">{PROVIDER_LABEL[s.provider]}</span>
         <span className="project" title={s.cwd ?? ""}>
           {s.projectName}
         </span>
@@ -96,10 +98,10 @@ export function SessionCard({ session: s, active, onClick }: Props) {
       )}
 
       <div className="card-foot">
-        <div className={`gauge gauge-${tone}`} title={`${compactTokens(s.contextTokens)} of ${compactTokens(s.contextWindow)}`}>
+        <div className={`gauge gauge-${tone}`} title={s.contextWindow > 0 ? `${compactTokens(s.contextTokens)} of ${compactTokens(s.contextWindow)}` : "Context window not yet reported"}>
           <div className="gauge-fill" style={{ width: `${Math.min(100, s.contextPct)}%` }} />
           <span className="gauge-label">
-            {Math.round(s.contextPct)}% ctx · {compactTokens(s.contextTokens)}
+            {s.contextWindow > 0 ? `${Math.round(s.contextPct)}% ctx` : "ctx unknown"} · {compactTokens(s.contextTokens)}
           </span>
         </div>
         <span className="when">{relativeTime(s.updatedAt)}</span>

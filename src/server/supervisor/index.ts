@@ -191,7 +191,7 @@ export function openFindings(): StuckEntry[] {
       status: session?.status ?? "unknown",
       canFocus: session?.canFocus ?? false,
       actionable: Boolean(session?.tty) && session?.status !== "ended",
-      nudgeable: Boolean(session?.tty) && !session?.tmux && session?.status !== "ended",
+      nudgeable: session?.provider === "claude" && Boolean(session?.tty) && !session?.tmux && session?.status !== "ended",
       tmux: session?.tmux?.label ?? null,
       nudgeText: (r.nudge_text as string | null) ?? null,
       signals: safeParse(r.signals) ?? [],
