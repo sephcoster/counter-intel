@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { SessionDetail, SessionRef } from "../shared/types.js";
+import { PROVIDER_LABEL, resumeCommand } from "../shared/provider.js";
 import { compactTokens, linearUrl, prUrl, relativeTime, shortenPath } from "./format.js";
 import { useFocus } from "./useFocus.js";
 
@@ -26,7 +27,7 @@ export function DetailPanel({ detail: d, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("activity");
   const [showAllRefs, setShowAllRefs] = useState(false);
   const { state: focusState, message: focusMessage, attachCommand, focus, attach } = useFocus();
-  const resumeCmd = `cd ${d.cwd ?? "."} && claude --resume ${d.sessionId}`;
+  const resumeCmd = resumeCommand(d);
   const tmux = d.tmux;
   const jumpText = tmux && !tmux.attached ? "⇥ Attach tmux session" : "⇥ Jump to tab";
   const jumpTitle = tmux
@@ -48,13 +49,14 @@ export function DetailPanel({ detail: d, onClose }: Props) {
       </div>
 
       <div className="drawer-facts">
+        <Fact label="Agent" value={PROVIDER_LABEL[d.provider]} />
         <Fact label="Path" value={shortenPath(d.cwd)} mono />
         <Fact label="Branch" value={d.gitBranch ?? "—"} mono />
         <Fact label="Worktree" value={d.isWorktree ? (d.worktreeOf ? `of ${shortenPath(d.worktreeOf)}` : "yes") : "no"} />
         <Fact label="Model" value={d.model ?? "—"} />
         <Fact
           label="Context"
-          value={`${compactTokens(d.contextTokens)} / ${compactTokens(d.contextWindow)} (${Math.round(d.contextPct)}%)`}
+          value={d.contextWindow > 0 ? `${compactTokens(d.contextTokens)} / ${compactTokens(d.contextWindow)} (${Math.round(d.contextPct)}%)` : `${compactTokens(d.contextTokens)} / unknown`}
         />
         <Fact label="Messages" value={`${d.messageCount} (${d.userMessageCount} prompts)`} />
         <Fact label="Status" value={`${d.status} · via ${d.statusSource}`} />
@@ -160,7 +162,7 @@ export function DetailPanel({ detail: d, onClose }: Props) {
           <ul className="events">
             {d.recentEvents.length === 0 && (
               <p className="muted">
-                No hook events. Run <code>npm run install-hook</code> for live status on new sessions.
+                {d.provider === "codex" ? "No turn events recorded in this Codex transcript." : <>No hook events. Run <code>npm run install-hook</code> for live status on new sessions.</>}
               </p>
             )}
             {d.recentEvents.map((e, i) => (

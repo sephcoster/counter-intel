@@ -3,12 +3,17 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { db } from "./db.js";
 import { applyLine, emptyAccumulator, type Accumulator } from "./parse.js";
+import { applyCodexLine } from "./codex.js";
+import type { SessionProvider } from "../shared/types.js";
 
 export const PROJECTS_DIR = process.env.COUNTER_INTEL_PROJECTS ?? join(homedir(), ".claude", "projects");
+export const CODEX_SESSIONS_DIR = process.env.COUNTER_INTEL_CODEX_SESSIONS
+  ?? join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions");
 
 const CHUNK = 4 * 1024 * 1024;
 
 interface Transcript {
+  provider: SessionProvider;
   sessionId: string;
   path: string;
   projectDir: string;
@@ -17,9 +22,8 @@ interface Transcript {
 }
 
 export function discoverTranscripts(): Transcript[] {
-  if (!existsSync(PROJECTS_DIR)) return [];
   const out: Transcript[] = [];
-  for (const projectDir of readdirSync(PROJECTS_DIR)) {
+  for (const projectDir of existsSync(PROJECTS_DIR) ? readdirSync(PROJECTS_DIR) : []) {
     const dir = join(PROJECTS_DIR, projectDir);
     let entries: string[];
     try {
@@ -35,6 +39,7 @@ export function discoverTranscripts(): Transcript[] {
         const st = statSync(path);
         if (!st.isFile()) continue;
         out.push({
+          provider: "claude",
           sessionId: basename(entry, ".jsonl"),
           path,
           projectDir,
@@ -46,7 +51,26 @@ export function discoverTranscripts(): Transcript[] {
       }
     }
   }
+  discoverCodex(CODEX_SESSIONS_DIR, out);
   return out;
+}
+
+function discoverCodex(dir: string, out: Transcript[]): void {
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      discoverCodex(path, out);
+      continue;
+    }
+    const id = /^rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(entry.name)?.[1];
+    if (!entry.isFile() || !id) continue;
+    try {
+      const st = statSync(path);
+      out.push({ provider: "codex", sessionId: id, path, projectDir: "codex", size: st.size, mtimeMs: st.mtimeMs });
+    } catch { /* transcript vanished mid-scan */ }
+  }
 }
 
 function rehydrate(row: Record<string, unknown>): Accumulator {
@@ -66,12 +90,19 @@ function rehydrate(row: Record<string, unknown>): Accumulator {
   acc.createdAt = (row.created_at as string) ?? null;
   acc.updatedAt = (row.updated_at as string) ?? null;
   acc.contextTokens = Number(row.context_tokens ?? 0);
+  acc.contextWindow = Number(row.context_window ?? 0);
+  acc.transcriptStatus = row.transcript_status as Accumulator["transcriptStatus"] ?? null;
   acc.isSidechain = Number(row.is_sidechain ?? 0) === 1;
   acc.seq = acc.messageCount;
+  if (typeof row.parser_state === "string") {
+    const state = JSON.parse(row.parser_state);
+    acc.seq = state.seq ?? acc.seq;
+    acc.toolCalls = new Map(state.toolCalls ?? []);
+  }
   return acc;
 }
 
-function readFrom(path: string, start: number, size: number, acc: Accumulator): number {
+function readFrom(path: string, start: number, size: number, acc: Accumulator, provider: SessionProvider): number {
   if (start >= size) return start;
   const fd = openSync(path, "r");
   let pos = start;
@@ -86,7 +117,10 @@ function readFrom(path: string, start: number, size: number, acc: Accumulator): 
       let idx: number;
       while ((idx = data.indexOf(0x0a, lineStart)) !== -1) {
         const line = data.subarray(lineStart, idx).toString("utf8").trim();
-        if (line) applyLine(acc, line);
+        if (line) {
+          if (provider === "codex") applyCodexLine(acc, line, pos - leftover.length + lineStart);
+          else applyLine(acc, line);
+        }
         lineStart = idx + 1;
       }
       leftover = data.subarray(lineStart);
@@ -104,14 +138,20 @@ INSERT INTO sessions (
   session_id, transcript_path, project_dir, cwd, git_branch, title,
   first_prompt, last_prompt, mode, permission_mode, model, version,
   message_count, user_message_count, created_at, updated_at,
-  context_tokens, is_sidechain, bytes_read, file_mtime, file_size
+  context_tokens, is_sidechain, bytes_read, file_mtime, file_size,
+  provider, context_window, transcript_status, parser_state
 ) VALUES (
   @session_id, @transcript_path, @project_dir, @cwd, @git_branch, @title,
   @first_prompt, @last_prompt, @mode, @permission_mode, @model, @version,
   @message_count, @user_message_count, @created_at, @updated_at,
-  @context_tokens, @is_sidechain, @bytes_read, @file_mtime, @file_size
+  @context_tokens, @is_sidechain, @bytes_read, @file_mtime, @file_size,
+  @provider, @context_window, @transcript_status, @parser_state
 )
 ON CONFLICT(session_id) DO UPDATE SET
+  provider        = excluded.provider,
+  context_window  = excluded.context_window,
+  transcript_status = excluded.transcript_status,
+  parser_state    = excluded.parser_state,
   transcript_path = excluded.transcript_path,
   project_dir     = excluded.project_dir,
   cwd             = COALESCE(excluded.cwd, sessions.cwd),
@@ -164,10 +204,22 @@ const clearDerived = db.transaction((sessionId: string) => {
   db.prepare("DELETE FROM session_refs WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM session_files WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM turns WHERE session_id = ?").run(sessionId);
+  db.prepare("DELETE FROM transcript_events WHERE session_id = ?").run(sessionId);
 });
 
-const persist = db.transaction((t: Transcript, acc: Accumulator, bytesRead: number) => {
+const upsertEvent = db.prepare(`INSERT OR IGNORE INTO transcript_events (session_id, id, event, ts, cwd)
+  VALUES (?, ?, ?, ?, ?)`);
+
+const persist = db.transaction((t: Transcript, acc: Accumulator, bytesRead: number, fromScratch: boolean) => {
+  if (fromScratch) {
+    clearDerived(t.sessionId);
+    db.prepare("DELETE FROM sessions WHERE session_id = ?").run(t.sessionId);
+  }
   upsertSession.run({
+    provider: t.provider,
+    context_window: acc.contextWindow,
+    transcript_status: acc.transcriptStatus,
+    parser_state: JSON.stringify({ seq: acc.seq, toolCalls: [...acc.toolCalls] }),
     session_id: t.sessionId,
     transcript_path: t.path,
     project_dir: t.projectDir,
@@ -196,6 +248,7 @@ const persist = db.transaction((t: Transcript, acc: Accumulator, bytesRead: numb
   for (const [path, f] of acc.files) upsertFile.run(t.sessionId, path, f.count, f.lastSeen);
   let seq = acc.seq - acc.turns.length;
   for (const turn of acc.turns) upsertTurn.run(t.sessionId, turn.uuid, turn.ts, seq++, turn.role, turn.text);
+  for (const event of acc.events) upsertEvent.run(t.sessionId, event.id, event.event, event.ts, event.cwd);
 });
 
 export interface IndexResult {
@@ -216,25 +269,23 @@ export function indexAll(force = false): IndexResult {
     const priorBytes = force ? 0 : Number(row?.bytes_read ?? 0);
     const priorSize = Number(row?.file_size ?? 0);
 
-    if (!force && row && priorBytes >= t.size && priorSize === t.size) continue;
+    const unchanged = row && priorSize === t.size && Number(row.file_mtime) === Math.floor(t.mtimeMs);
+    if (!force && unchanged && priorBytes >= t.size) continue;
 
     // A shrunk file means it was rewritten, not appended to — start over.
-    const fromScratch = force || !row || t.size < priorBytes;
+    const fromScratch = force || !row || t.size < priorSize || (t.size === priorSize && !unchanged);
     const acc = fromScratch ? emptyAccumulator() : rehydrate(row);
     const start = fromScratch ? 0 : priorBytes;
 
-    // Refs and file counts accumulate, so a re-parse has to drop the old rows first.
-    if (fromScratch && row) clearDerived(t.sessionId);
-
     let consumed: number;
     try {
-      consumed = readFrom(t.path, start, t.size, acc);
+      consumed = readFrom(t.path, start, t.size, acc, t.provider);
     } catch {
       continue;
     }
 
     bytesRead += consumed - start;
-    persist(t, acc, consumed);
+    persist(t, acc, consumed, fromScratch);
     updated += 1;
   }
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Situational awareness across concurrent Claude Code sessions",
+  "description": "Situational awareness across concurrent Claude Code and Codex sessions",
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "tsx watch src/server/index.ts",
@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.server.json && vite build",
     "start": "node dist/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.server.json",
+    "test": "node --import tsx --test tests/*.test.ts",
     "install-hook": "node scripts/install-hook.mjs"
   },
   "dependencies": {

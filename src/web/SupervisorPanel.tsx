@@ -62,6 +62,7 @@ const OUTCOME_TONE: Record<string, string> = {
   sent: "ok",
   "dry-run": "dry",
   "skipped-status": "skip",
+  "skipped-provider": "skip",
   "skipped-rate-limit": "skip",
   "skipped-busy": "skip",
   "skipped-busy-unknown": "skip",

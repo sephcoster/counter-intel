@@ -67,6 +67,9 @@ export interface Accumulator {
   createdAt: string | null;
   updatedAt: string | null;
   contextTokens: number;
+  contextWindow: number;
+  transcriptStatus: "working" | "waiting" | "blocked" | null;
+  events: Array<{ id: number; event: string; ts: string | null; cwd: string | null }>;
   isSidechain: boolean;
   refs: Map<string, { kind: string; value: string; lastSeen: string | null; rank: number }>;
   /** tool_use id -> what invoked it, so a tool_result can be judged by its command. */
@@ -81,7 +84,8 @@ export function emptyAccumulator(): Accumulator {
     sessionId: null, cwd: null, gitBranch: null, title: null,
     firstPrompt: null, lastPrompt: null, mode: null, permissionMode: null,
     model: null, version: null, messageCount: 0, userMessageCount: 0,
-    createdAt: null, updatedAt: null, contextTokens: 0, isSidechain: false,
+    createdAt: null, updatedAt: null, contextTokens: 0, contextWindow: 0,
+    transcriptStatus: null, events: [], isSidechain: false,
     refs: new Map(), toolCalls: new Map(), files: new Map(), turns: [], seq: 0,
   };
 }
@@ -148,7 +152,7 @@ function record(
   }
 }
 
-function harvestRefs(acc: Accumulator, text: string, ts: string | null, source: RefSource): void {
+export function harvestRefs(acc: Accumulator, text: string, ts: string | null, source: RefSource): void {
   const found = matchRefs(text);
   if (source === "prose" && distinctCount(found) > PROSE_REF_CAP) return;
   record(acc, found, ts, source);
@@ -162,7 +166,7 @@ function distinctCount(found: Array<{ kind: string; value: string }>): number {
  * Tool output records what a session *saw*, which for one `gh pr list` is dozens of PRs it
  * has nothing to do with. Only creations and small single-target results are taken.
  */
-function harvestToolOutput(
+export function harvestToolOutput(
   acc: Accumulator,
   text: string,
   ts: string | null,
@@ -292,6 +296,7 @@ export function applyLine(acc: Accumulator, raw: string): void {
         if (b?.type !== "tool_result") continue;
         const invoked = typeof b.tool_use_id === "string" ? acc.toolCalls.get(b.tool_use_id) : undefined;
         harvestToolOutput(acc, blocksToText([b]), ts, invoked);
+        if (typeof b.tool_use_id === "string") acc.toolCalls.delete(b.tool_use_id);
       }
     }
   } else {
