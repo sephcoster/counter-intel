@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { basename } from "node:path";
 import { realpathSync } from "node:fs";
@@ -11,6 +11,7 @@ export type FocusFailure =
   | "not-found"
   | "no-terminal"
   | "error"
+  | "timeout"
   | "tmux-gone"
   | "tmux-other-session"
   | "tmux-client-unreachable";
@@ -93,6 +94,7 @@ async function tryScript(script: string, arg: string): Promise<string> {
     const { stdout } = await run("osascript", ["-e", script, arg], { timeout: 8000 });
     return stdout.trim();
   } catch (err) {
+    if ((err as { killed?: boolean }).killed) return "timeout";
     return `error:${err instanceof Error ? err.message : String(err)}`;
   }
 }
@@ -127,15 +129,15 @@ function bundleFor(executable: string): string | null {
  * below the real one, so the first match walking up is the wrong one. A tmux pane tty
  * has no such ancestor, which is correct — panes are resolved through tmux instead.
  */
-function appForTty(tty: string): OwningApp | null {
+async function appForTty(tty: string): Promise<OwningApp | null> {
   let table: string;
   try {
-    table = execFileSync("ps", ["-eo", "pid=,ppid=,comm="], {
+    const result = await run("ps", ["-eo", "pid=,ppid=,comm="], {
       encoding: "utf8",
       timeout: 5000,
       maxBuffer: 8 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "ignore"],
     });
+    table = result.stdout;
   } catch {
     return null;
   }
@@ -151,10 +153,9 @@ function appForTty(tty: string): OwningApp | null {
 
   let pid: number | null = null;
   try {
-    const owner = execFileSync("ps", ["-t", tty, "-o", "pid="], {
+    const { stdout: owner } = await run("ps", ["-t", tty, "-o", "pid="], {
       encoding: "utf8",
       timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
     });
     const first = owner.trim().split("\n")[0]?.trim();
     pid = first ? Number(first) : null;
@@ -184,20 +185,34 @@ async function activateApp(app: OwningApp): Promise<boolean> {
   }
 }
 
-async function focusEmulatorTab(tty: string): Promise<FocusResult> {
-  const iterm = await tryScript(ITERM_SCRIPT, tty);
-  if (iterm === "ok") return { ok: true, app: "iTerm2", via: "tab" };
+const emulatorTools = { appForTty, tryScript, activateApp };
 
-  const terminal = await tryScript(TERMINAL_SCRIPT, tty);
-  if (terminal === "ok") return { ok: true, app: "Terminal", via: "tab" };
-
-  const app = appForTty(tty);
-  if (app && (await activateApp(app))) return { ok: true, app: app.name, via: "app" };
-
-  if (iterm === "notrunning" && terminal === "notrunning") return { ok: false, reason: "no-terminal" };
-  if (iterm.startsWith("error:")) return { ok: false, reason: "error", detail: iterm.slice(6) };
-  if (terminal.startsWith("error:")) return { ok: false, reason: "error", detail: terminal.slice(6) };
-  return { ok: false, reason: "not-found" };
+export async function focusEmulatorTab(tty: string, deps = emulatorTools): Promise<FocusResult> {
+  const app = await deps.appForTty(tty);
+  const terminals = [
+    { name: "iTerm2", script: ITERM_SCRIPT, owns: app?.name === "iTerm" || app?.name === "iTerm2" },
+    { name: "Terminal", script: TERMINAL_SCRIPT, owns: app?.name === "Terminal" },
+  ];
+  const owner = terminals.find((t) => t.owns);
+  // A known owner needs only one AppleScript call. Unsupported emulators can be
+  // raised directly without first waiting for two unrelated applications.
+  if (app && !owner) {
+    return await deps.activateApp(app)
+      ? { ok: true, app: app.name, via: "app" }
+      : { ok: false, reason: "error", detail: `Could not raise ${app.name}` };
+  }
+  let closed = 0;
+  let error: string | undefined;
+  for (const terminal of owner ? [owner] : terminals) {
+    const result = await deps.tryScript(terminal.script, tty);
+    if (result === "ok") return { ok: true, app: terminal.name, via: "tab" };
+    if (result === "timeout") return { ok: false, reason: "timeout", detail: `${terminal.name} did not respond within 8 seconds` };
+    if (result === "notrunning") closed += 1;
+    if (result.startsWith("error:")) error = result.slice(6);
+  }
+  // Raising iTerm after its tab lookup failed is not a successful tab jump.
+  if (error) return { ok: false, reason: "error", detail: error };
+  return { ok: false, reason: closed === (owner ? 1 : 2) ? "no-terminal" : "not-found" };
 }
 
 async function attachInNewWindow(pane: TmuxPane): Promise<FocusResult> {
@@ -206,9 +221,11 @@ async function attachInNewWindow(pane: TmuxPane): Promise<FocusResult> {
 
   const iterm = await tryScript(ITERM_ATTACH_SCRIPT, command);
   if (iterm === "ok") return { ok: true, app: "iTerm2", via: "tmux-attach", tmux: label };
+  if (iterm === "timeout") return { ok: false, reason: "timeout", tmux: label, attachCommand: command };
 
   const terminal = await tryScript(TERMINAL_ATTACH_SCRIPT, command);
   if (terminal === "ok") return { ok: true, app: "Terminal", via: "tmux-attach", tmux: label };
+  if (terminal === "timeout") return { ok: false, reason: "timeout", tmux: label, attachCommand: command };
 
   if (iterm === "notrunning" && terminal === "notrunning") {
     return { ok: false, reason: "no-terminal", tmux: label, attachCommand: command };
@@ -246,10 +263,10 @@ async function focusTmuxPane(pane: TmuxPane, snapshot: TmuxSnapshot): Promise<Fo
   }
 
   if (onSession.length > 0) {
-    const owners = onSession.map((c) => {
-      const app = appForTty(normalizeTty(c.tty) ?? c.tty);
+    const owners = await Promise.all(onSession.map(async (c) => {
+      const app = await appForTty(normalizeTty(c.tty) ?? c.tty);
       return app ? `${c.tty} (${app.name})` : c.tty;
-    });
+    }));
     return {
       ok: false,
       reason: "tmux-client-unreachable",

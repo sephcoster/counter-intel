@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SessionDetail, SessionStatus, SessionSummary } from "../shared/types.js";
-import { PROVIDER_LABEL } from "../shared/provider.js";
+import { matchesSessionQuery, prNumberQuery, withinSessionScope } from "../shared/search.js";
 import { SessionCard } from "./SessionCard.js";
 import { DetailPanel } from "./DetailPanel.js";
 import { SupervisorPanel } from "./SupervisorPanel.js";
@@ -22,11 +22,6 @@ const SCOPE_LABEL: Record<Scope, string> = {
   recent: "Last 7 days",
   all: "Everything",
 };
-
-function withinDays(s: SessionSummary, days: number): boolean {
-  if (!s.updatedAt) return false;
-  return Date.now() - Date.parse(s.updatedAt) < days * 86_400_000;
-}
 
 function groupByStatus(list: SessionSummary[]): Array<readonly [SessionStatus, SessionSummary[]]> {
   const map = new Map<SessionStatus, SessionSummary[]>();
@@ -107,13 +102,7 @@ export function App() {
   }, []);
 
   const matchesQuery = useCallback(
-    (s: SessionSummary) => {
-      const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return [PROVIDER_LABEL[s.provider], s.title, s.firstPrompt, s.projectName, s.gitBranch, s.cwd, s.lastPrompt, ...s.refs.map((r) => r.value)]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q));
-    },
+    (s: SessionSummary) => matchesSessionQuery(s, query),
     [query],
   );
 
@@ -135,12 +124,11 @@ export function App() {
       sessions
         .filter((s) => {
           if (s.isLive) return false;
-          if (scope === "active") return false;
-          if (scope === "recent" && !withinDays(s, 7)) return false;
+          if (!withinSessionScope(s, scope, query)) return false;
           return matchesQuery(s);
         })
         .sort(byRecency),
-    [sessions, scope, matchesQuery],
+    [sessions, scope, query, matchesQuery],
   );
 
   // Pills summarize what is open right now; history counts would swamp them.
@@ -217,6 +205,9 @@ export function App() {
       {error && <div className="banner error">API unreachable: {error}</div>}
 
       <main className="board">
+        {scope === "recent" && prNumberQuery(query) !== null && (
+          <p className="drawer-note">Searching PR references across all dates.</p>
+        )}
         {live.length === 0 && past.length === 0 && !error && (
           <div className="empty">
             <p>No sessions match.</p>
@@ -289,7 +280,7 @@ export function App() {
         {loadedAt && <span>updated {new Date(loadedAt).toLocaleTimeString()}</span>}
       </footer>
 
-      {detail && <DetailPanel detail={detail} onClose={() => setSelected(null)} />}
+      {detail && <DetailPanel key={detail.sessionId} detail={detail} onClose={() => setSelected(null)} />}
       {showSupervisor && (
         <SupervisorPanel
           onClose={() => setShowSupervisor(false)}

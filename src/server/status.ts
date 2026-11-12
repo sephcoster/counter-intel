@@ -70,8 +70,11 @@ export function matchProcess(
   claimed: Set<number>,
 ): LiveProc | null {
   procs = procs.filter((p) => p.provider === (row.provider ?? "claude"));
-  const explicit = procs.find((p) => p.sessionIds.includes(String(row.session_id)) ||
+  const exact = procs.filter((p) => p.sessionIds.includes(String(row.session_id)) ||
     (p.sessionIds.length === 0 && explicitSessionId(p.command, p.provider) === row.session_id));
+  // A daemon can own the rollout while a separate CLI displays the same thread.
+  // Process enumeration order must never hide that CLI's terminal.
+  const explicit = exact.find((p) => normalizeTty(p.tty) !== null) ?? exact[0];
   if (explicit) return explicit;
 
   if (event?.pid) {
@@ -87,6 +90,48 @@ export function matchProcess(
     !(p.provider === "codex" && /\bapp-server\b/.test(p.command)));
   if (candidates.length === 0) return null;
   return candidates[0] ?? null;
+}
+
+/** Resolve exact identities before allowing any directory-based fallback. */
+export function matchProcesses(
+  rows: Array<Record<string, unknown>>,
+  events: Map<string, LatestEvent>,
+  procs: LiveProc[],
+): Map<string, LiveProc> {
+  const matches = new Map<string, LiveProc>();
+  const claimed = new Set<number>();
+  for (const row of rows) {
+    const id = String(row.session_id);
+    // Suppress cwd matching in the first pass.
+    const proc = matchProcess({ ...row, cwd: null }, events.get(id), procs, claimed);
+    if (proc) { matches.set(id, proc); claimed.add(proc.pid); }
+  }
+
+  const codexDirectories = new Set(rows.filter((r) => r.provider === "codex" && r.cwd).map((r) => r.cwd));
+  for (const cwd of codexDirectories) {
+    const terminals = procs.filter((p) => p.provider === "codex" && p.cwd === cwd &&
+      normalizeTty(p.tty) !== null && !claimed.has(p.pid) && p.sessionIds.length === 0 &&
+      !explicitSessionId(p.command, p.provider) && !/\bapp-server\b/.test(p.command));
+    if (terminals.length !== 1) continue;
+    const local = rows.filter((r) => r.provider === "codex" && r.cwd === cwd && !r.is_sidechain);
+    const live = local.filter((r) => matches.has(String(r.session_id)));
+    // Prefer a single loaded daemon thread. With no daemon match, a directory
+    // containing several historical transcripts cannot identify the CLI safely.
+    const candidates = live.length ? live : local;
+    if (candidates.length !== 1) continue;
+    const id = String(candidates[0].session_id);
+    if (normalizeTty(matches.get(id)?.tty ?? null)) continue;
+    matches.set(id, terminals[0]);
+    claimed.add(terminals[0].pid);
+  }
+
+  for (const row of rows) {
+    const id = String(row.session_id);
+    if (matches.has(id) || row.provider === "codex") continue;
+    const proc = matchProcess(row, events.get(id), procs, claimed);
+    if (proc) { matches.set(id, proc); claimed.add(proc.pid); }
+  }
+  return matches;
 }
 
 export function deriveStatus(
@@ -134,16 +179,21 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
   const events = latestEvents();
   const procs = liveProcesses();
   const tmux = tmuxSnapshot();
-  const claimed = new Set<number>();
+  const matches = matchProcesses(rows, events, procs);
   const refs = refsFor(rows.map((r) => String(r.session_id)));
+  const prNumbers = new Map<string, string[]>();
+  for (const row of db.prepare("SELECT session_id, number FROM session_pr_numbers").all() as Array<{ session_id: string; number: string }>) {
+    const numbers = prNumbers.get(row.session_id) ?? [];
+    numbers.push(row.number);
+    prNumbers.set(row.session_id, numbers);
+  }
   const now = Date.now();
 
   return rows.map((row) => {
     const sessionId = String(row.session_id);
     const provider = row.provider === "codex" ? "codex" : "claude";
     const event = provider === "claude" ? events.get(sessionId) : undefined;
-    const proc = matchProcess(row, event, procs, claimed);
-    if (proc) claimed.add(proc.pid);
+    const proc = matches.get(sessionId) ?? null;
 
     const { status, source } = deriveStatus(row, event, proc, now);
     const cwd = (row.cwd as string | null) ?? null;
@@ -196,6 +246,7 @@ export function listSessions(includeSidechains = false): SessionSummary[] {
       permissionMode: (row.permission_mode as string | null) ?? null,
       isSidechain: Number(row.is_sidechain ?? 0) === 1,
       refs: refs.get(sessionId) ?? [],
+      prNumbers: prNumbers.get(sessionId) ?? [],
       transcriptPath: String(row.transcript_path),
       sizeBytes: Number(row.file_size ?? 0),
     };

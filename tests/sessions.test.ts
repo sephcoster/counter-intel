@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { explicitSessionId, providerForCommand, rolloutSessions, type LiveProc } from "../src/server/live.js";
 import { resumeCommand } from "../src/shared/provider.js";
+import { matchesSessionQuery, prNumberQuery, withinSessionScope } from "../src/shared/search.js";
 
 const root = mkdtempSync(join(tmpdir(), "counter-intel-test-"));
 process.env.COUNTER_INTEL_HOME = root;
@@ -16,7 +17,7 @@ const { applyCodexLine } = await import("../src/server/codex.js");
 const { emptyAccumulator } = await import("../src/server/parse.js");
 const { db } = await import("../src/server/db.js");
 const { indexAll, discoverTranscripts } = await import("../src/server/indexer.js");
-const { deriveStatus, matchProcess, listSessions, getSession } = await import("../src/server/status.js");
+const { deriveStatus, matchProcess, matchProcesses, listSessions, getSession } = await import("../src/server/status.js");
 const id = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
 const ts = "2026-09-15T15:00:00.000Z";
@@ -48,7 +49,7 @@ function proc(overrides: Partial<LiveProc> = {}): LiveProc {
 }
 
 beforeEach(() => {
-  for (const table of ["sessions", "session_refs", "session_files", "turns", "transcript_events", "hook_events"]) {
+  for (const table of ["sessions", "session_refs", "session_pr_numbers", "session_files", "turns", "transcript_events", "hook_events"]) {
     db.prepare(`DELETE FROM ${table}`).run();
   }
   rmSync(join(root, "codex"), { recursive: true, force: true });
@@ -192,7 +193,7 @@ test("process detection recognizes launchers and app servers without helpers or 
   for (const command of ["codex", "node /usr/bin/codex", "/usr/bin/node /usr/bin/codex.js", "/Applications/Codex.app/Contents/Resources/codex app-server", "codex fix the login page and mcp tools"]) {
     assert.equal(providerForCommand(command), "codex", command);
   }
-  for (const command of ["codex-code-mode-host", "codex mcp-server", "rg codex", "/bin/zsh -c codex", "node monitor.js codex"]) {
+  for (const command of ["codex-code-mode-host", "codex mcp-server", "codex sandbox -- node worker.js", "codex debug app-server", "rg codex", "/bin/zsh -c codex", "node monitor.js codex"]) {
     assert.equal(providerForCommand(command), null, command);
   }
   assert.equal(providerForCommand("claude"), "claude");
@@ -214,6 +215,110 @@ test("matching isolates providers and reserves exact IDs ahead of cwd heuristics
   assert.equal(matchProcess(row, undefined, [proc()], new Set([42])), null);
   assert.equal(matchProcess(row, undefined, [proc({ sessionIds: [id, otherId] })], new Set([42]))?.pid, 42);
   assert.equal(matchProcess(row, undefined, [proc()], new Set())?.pid, 42);
+});
+
+test("a terminal with an exact session ID wins over the shared daemon in either order", () => {
+  const daemon = proc({ pid: 1, tty: null, command: "codex app-server", sessionIds: [id, otherId] });
+  const terminal = proc({ command: `codex resume ${id}` });
+  const rows = [id, otherId].map((session_id) => ({ session_id, provider: "codex", cwd: root }));
+  for (const processes of [[daemon, terminal], [terminal, daemon]]) {
+    assert.equal(matchProcess(rows[0], undefined, processes, new Set()), terminal);
+    const matches = matchProcesses(rows, new Map(), processes);
+    assert.equal(matches.get(id), terminal);
+    assert.equal(matches.get(otherId), daemon);
+  }
+  // Open rollout identity is newer than the ID in the launch command after a switch.
+  const switched = proc({ command: `codex resume ${id}`, sessionIds: [otherId] });
+  assert.equal(matchProcess(rows[0], undefined, [daemon, switched], new Set()), daemon);
+  assert.equal(matchProcess(rows[1], undefined, [daemon, switched], new Set()), switched);
+});
+
+test("directory fallback links a unique live daemon thread and never steals its tab for history", () => {
+  const rows = [otherId, id].map((session_id) => ({ session_id, provider: "codex", cwd: root }));
+  const daemon = proc({ pid: 1, tty: null, command: "codex app-server", sessionIds: [id] });
+  const terminal = proc();
+  for (const order of [rows, [...rows].reverse()]) {
+    const matches = matchProcesses(order, new Map(), [daemon, terminal]);
+    assert.equal(matches.get(id), terminal);
+    assert.equal(matches.has(otherId), false);
+  }
+  // Multiple live threads or multiple terminals in the same directory are ambiguous.
+  assert.equal(matchProcesses(rows, new Map(), [{ ...daemon, sessionIds: [id, otherId] }, terminal]).get(id)?.tty, null);
+  assert.equal(matchProcesses(rows, new Map(), [daemon, terminal, proc({ pid: 43 })]).get(id)?.tty, null);
+  assert.equal(matchProcesses(rows, new Map(), [terminal]).size, 0);
+  assert.equal(matchProcesses([rows[1]], new Map(), [terminal]).get(id), terminal);
+});
+
+test("Claude hook matches are reserved before directory fallback", () => {
+  const rows = [otherId, id].map((session_id) => ({ session_id, provider: "claude", cwd: root }));
+  const terminal = proc({ provider: "claude", command: "claude" });
+  const events = new Map([[id, { session_id: id, event: "Stop", pid: terminal.pid, tty: terminal.tty, ts }]]);
+  const matches = matchProcesses(rows, events, [terminal]);
+  assert.equal(matches.get(id), terminal);
+  assert.equal(matches.has(otherId), false);
+});
+
+test("PR numbers survive intermediate messages, truncation, incremental reads and parser upgrades", () => {
+  const path = rollout(meta() + message("user", "Start work") +
+    message("user", `${"x".repeat(3000)} Review PR #4242 and pull request 4243`) +
+    message("assistant", "Also check org/repo#4244 and #4245") + message("user", "Thanks"));
+  indexAll();
+  let detail = getSession(id)!;
+  assert.deepEqual(detail.prNumbers.sort(), ["4242", "4243", "4244", "4245"]);
+  for (const query of ["4242", "#4242", "PR #4242", "pull request 4242"]) {
+    assert.equal(matchesSessionQuery(detail, query), true, query);
+  }
+  assert.equal(matchesSessionQuery(detail, "424"), false);
+  // No repository is invented for a bare PR number.
+  assert.equal(matchesSessionQuery(detail, "wrong/repo#4242"), false);
+  assert.deepEqual(detail.refs.filter((r) => r.kind === "pr").map((r) => r.value), ["org/repo#4244"]);
+  assert.equal(matchesSessionQuery(detail, "org/repo#4244"), true);
+  appendFileSync(path, message("assistant", "PR #4246 is ready"));
+  indexAll();
+  assert.equal(getSession(id)!.prNumbers.length, 5);
+  // Old databases get backfilled even when the transcript hasn't changed.
+  db.prepare("DELETE FROM session_pr_numbers").run();
+  db.prepare("UPDATE sessions SET parser_version = 0").run();
+  assert.equal(indexAll().updated, 1);
+  detail = getSession(id)!;
+  assert.equal(detail.prNumbers.length, 5);
+  assert.equal(indexAll().updated, 0);
+  writeFileSync(path, meta() + message("user", "Different task"));
+  indexAll();
+  assert.deepEqual(getSession(id)!.prNumbers, []);
+});
+
+test("PR search respects exact numbers and repositories and searches beyond the default date window", () => {
+  rollout(meta() + message("user", "https://github.com/org/repo/pull/4242"));
+  indexAll();
+  const detail = { ...getSession(id)!, isLive: false, updatedAt: ts };
+  for (const query of ["org/repo#4242", "https://github.com/org/repo/pull/4242", "PR #4242"]) {
+    assert.equal(matchesSessionQuery(detail, query), true);
+    assert.equal(withinSessionScope(detail, "recent", query, Date.parse(ts) + 30 * 86400000), true);
+  }
+  assert.equal(matchesSessionQuery(detail, "org/other#4242"), false);
+  assert.equal(matchesSessionQuery(detail, "424"), false);
+  assert.equal(withinSessionScope(detail, "active", "4242"), false);
+  assert.equal(withinSessionScope(detail, "recent", "Codex", Date.parse(ts) + 30 * 86400000), false);
+  assert.equal(prNumberQuery(" PR #004242 "), "4242");
+  assert.equal(prNumberQuery("Fix PR 4242"), null);
+});
+
+test("PR number indexing excludes injected context and bulk tool listings", () => {
+  const acc = parse(meta() + message("user", "<environment_context>PR #99999</environment_context>") +
+    record("response_item", { type: "function_call_output", call_id: "list", output: "PR #10001 PR #10002 PR #10003" }) +
+    message("user", "Review PR #4242"));
+  assert.deepEqual([...acc.prNumbers], ["4242"]);
+});
+
+test("Claude intermediate prompts also index bare PR numbers", () => {
+  const dir = join(root, "claude", "project");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${otherId}.jsonl`), ["Hello", "Review PR #4242", "Thanks"].map((content, i) =>
+    JSON.stringify({ type: "user", sessionId: otherId, cwd: root, timestamp: ts, uuid: `u${i}`, message: { content } })
+  ).join("\n") + "\n");
+  indexAll();
+  assert.deepEqual(getSession(otherId)!.prNumbers, ["4242"]);
 });
 
 test("Codex turn state remains working during long tools but dead processes are idle", () => {

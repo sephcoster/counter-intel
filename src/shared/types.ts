@@ -67,6 +67,8 @@ export interface SessionSummary {
   permissionMode: string | null;
   isSidechain: boolean;
   refs: SessionRef[];
+  /** PR numbers mentioned throughout the transcript, including references without a repository URL. */
+  prNumbers: string[];
   transcriptPath: string;
   sizeBytes: number;
 }

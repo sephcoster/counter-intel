@@ -11,6 +11,7 @@ export const CODEX_SESSIONS_DIR = process.env.COUNTER_INTEL_CODEX_SESSIONS
   ?? join(process.env.CODEX_HOME ?? join(homedir(), ".codex"), "sessions");
 
 const CHUNK = 4 * 1024 * 1024;
+const PARSER_VERSION = 2;
 
 interface Transcript {
   provider: SessionProvider;
@@ -202,6 +203,7 @@ const selectSession = db.prepare("SELECT * FROM sessions WHERE session_id = ?");
 
 const clearDerived = db.transaction((sessionId: string) => {
   db.prepare("DELETE FROM session_refs WHERE session_id = ?").run(sessionId);
+  db.prepare("DELETE FROM session_pr_numbers WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM session_files WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM turns WHERE session_id = ?").run(sessionId);
   db.prepare("DELETE FROM transcript_events WHERE session_id = ?").run(sessionId);
@@ -209,6 +211,9 @@ const clearDerived = db.transaction((sessionId: string) => {
 
 const upsertEvent = db.prepare(`INSERT OR IGNORE INTO transcript_events (session_id, id, event, ts, cwd)
   VALUES (?, ?, ?, ?, ?)`);
+
+const insertNumber = db.prepare("INSERT OR IGNORE INTO session_pr_numbers (session_id, number) VALUES (?, ?)");
+const updateParserVersion = db.prepare("UPDATE sessions SET parser_version = ? WHERE session_id = ?");
 
 const persist = db.transaction((t: Transcript, acc: Accumulator, bytesRead: number, fromScratch: boolean) => {
   if (fromScratch) {
@@ -245,6 +250,8 @@ const persist = db.transaction((t: Transcript, acc: Accumulator, bytesRead: numb
   for (const ref of acc.refs.values()) {
     upsertRef.run(t.sessionId, ref.kind, ref.value, ref.lastSeen, ref.rank);
   }
+  for (const number of acc.prNumbers) insertNumber.run(t.sessionId, number);
+  updateParserVersion.run(PARSER_VERSION, t.sessionId);
   for (const [path, f] of acc.files) upsertFile.run(t.sessionId, path, f.count, f.lastSeen);
   let seq = acc.seq - acc.turns.length;
   for (const turn of acc.turns) upsertTurn.run(t.sessionId, turn.uuid, turn.ts, seq++, turn.role, turn.text);
@@ -270,10 +277,11 @@ export function indexAll(force = false): IndexResult {
     const priorSize = Number(row?.file_size ?? 0);
 
     const unchanged = row && priorSize === t.size && Number(row.file_mtime) === Math.floor(t.mtimeMs);
-    if (!force && unchanged && priorBytes >= t.size) continue;
+    const outdated = Number(row?.parser_version ?? 0) !== PARSER_VERSION;
+    if (!force && !outdated && unchanged && priorBytes >= t.size) continue;
 
     // A shrunk file means it was rewritten, not appended to — start over.
-    const fromScratch = force || !row || t.size < priorSize || (t.size === priorSize && !unchanged);
+    const fromScratch = force || !row || outdated || t.size < priorSize || (t.size === priorSize && !unchanged);
     const acc = fromScratch ? emptyAccumulator() : rehydrate(row);
     const start = fromScratch ? 0 : priorBytes;
 

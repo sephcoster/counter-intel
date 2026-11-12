@@ -87,7 +87,7 @@ export function providerForCommand(command: string): SessionProvider | null {
   }
   const executable = /^(?:(?:\S*\/)?node\s+)?(?:\S*\/)?codex(?:\.js)?(?:\s|$)/.exec(command);
   if (!executable) return null;
-  if (/^(?:mcp-server|mcp|login|logout|completion|app-server-health)(?:\s|$)/.test(command.slice(executable[0].length).trimStart())) return null;
+  if (/^(?:mcp-server|mcp|login|logout|completion|app-server-health|sandbox|debug)(?:\s|$)/.test(command.slice(executable[0].length).trimStart())) return null;
   return "codex";
 }
 
