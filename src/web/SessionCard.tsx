@@ -44,6 +44,7 @@ export function SessionCard({ session: s, active, onClick }: Props) {
         {s.canFocus && (
           <button
             className={`jump jump-${state}`}
+            disabled={state === "working"}
             title={message ?? jumpLabel}
             onClick={(e) => {
               e.stopPropagation();

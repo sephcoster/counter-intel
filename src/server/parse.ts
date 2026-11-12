@@ -1,6 +1,8 @@
 import { loadConfig } from "./config.js";
 
 const PR_RE = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)/g;
+const PR_SHORT_RE = /\b([\w.-]+)\/([\w.-]+)#(\d+)\b/g;
+const PR_NUMBER_RE = /\b(?:PR|pull request)\s*#?\s*(\d+)\b|(?:^|[\s(])#(\d+)\b|\b[\w.-]+\/[\w.-]+#(\d+)\b/gi;
 const LINEAR_URL_RE = /https?:\/\/linear\.app\/[\w-]+\/issue\/([A-Z][A-Z0-9]{1,5}-\d{1,6})/g;
 // Letters-only prefix: real team keys (ALL, CIR, BOLT, INFR) never contain digits, while
 // the uppercase-hex fragments these transcripts are full of (D5BE-7879, CED8-2126) always do.
@@ -72,6 +74,7 @@ export interface Accumulator {
   events: Array<{ id: number; event: string; ts: string | null; cwd: string | null }>;
   isSidechain: boolean;
   refs: Map<string, { kind: string; value: string; lastSeen: string | null; rank: number }>;
+  prNumbers: Set<string>;
   /** tool_use id -> what invoked it, so a tool_result can be judged by its command. */
   toolCalls: Map<string, { command: string; name: string }>;
   files: Map<string, { count: number; lastSeen: string | null }>;
@@ -86,7 +89,7 @@ export function emptyAccumulator(): Accumulator {
     model: null, version: null, messageCount: 0, userMessageCount: 0,
     createdAt: null, updatedAt: null, contextTokens: 0, contextWindow: 0,
     transcriptStatus: null, events: [], isSidechain: false,
-    refs: new Map(), toolCalls: new Map(), files: new Map(), turns: [], seq: 0,
+    refs: new Map(), prNumbers: new Set(), toolCalls: new Map(), files: new Map(), turns: [], seq: 0,
   };
 }
 
@@ -125,6 +128,7 @@ function matchRefs(text: string): Array<{ kind: string; value: string }> {
   const out: Array<{ kind: string; value: string }> = [];
   if (!text) return out;
   for (const m of text.matchAll(PR_RE)) out.push({ kind: "pr", value: `${m[1]}/${m[2]}#${m[3]}` });
+  for (const m of text.matchAll(PR_SHORT_RE)) out.push({ kind: "pr", value: `${m[1]}/${m[2]}#${m[3]}` });
   for (const m of text.matchAll(LINEAR_URL_RE)) out.push({ kind: "linear", value: m[1] });
   const allowlist = new Set(loadConfig().linearPrefixes);
   for (const m of text.matchAll(LINEAR_KEY_RE)) {
@@ -155,7 +159,15 @@ function record(
 export function harvestRefs(acc: Accumulator, text: string, ts: string | null, source: RefSource): void {
   const found = matchRefs(text);
   if (source === "prose" && distinctCount(found) > PROSE_REF_CAP) return;
+  harvestPrNumbers(acc, text, source === "prompt" ? Infinity : PROSE_REF_CAP);
   record(acc, found, ts, source);
+}
+
+function harvestPrNumbers(acc: Accumulator, text: string, cap: number): void {
+  const numbers = new Set<string>();
+  for (const m of text.matchAll(PR_NUMBER_RE)) numbers.add((m[1] ?? m[2] ?? m[3]).replace(/^0+(?=\d)/, ""));
+  for (const m of text.matchAll(PR_RE)) numbers.add(m[3].replace(/^0+(?=\d)/, ""));
+  if (numbers.size <= cap) for (const number of numbers) acc.prNumbers.add(number);
 }
 
 function distinctCount(found: Array<{ kind: string; value: string }>): number {
@@ -173,9 +185,10 @@ export function harvestToolOutput(
   invoked: { command: string; name: string } | undefined,
 ): void {
   const found = matchRefs(text);
-  if (found.length === 0) return;
   const creating =
     CREATING_COMMAND.test(invoked?.command ?? "") || CREATING_TOOL.test(invoked?.name ?? "");
+  harvestPrNumbers(acc, text, creating ? Infinity : TOOL_REF_CAP);
+  if (found.length === 0) return;
   if (creating) return record(acc, found, ts, "created");
   if (distinctCount(found) <= TOOL_REF_CAP) {
     record(acc, found, ts, "tool");

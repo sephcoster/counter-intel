@@ -136,6 +136,13 @@ addColumn("sessions", "provider", "TEXT NOT NULL DEFAULT 'claude'");
 addColumn("sessions", "context_window", "INTEGER NOT NULL DEFAULT 0");
 addColumn("sessions", "transcript_status", "TEXT");
 addColumn("sessions", "parser_state", "TEXT");
+addColumn("sessions", "parser_version", "INTEGER NOT NULL DEFAULT 0");
+
+db.exec(`CREATE TABLE IF NOT EXISTS session_pr_numbers (
+  session_id TEXT NOT NULL,
+  number TEXT NOT NULL,
+  PRIMARY KEY (session_id, number)
+)`);
 
 db.exec(`CREATE TABLE IF NOT EXISTS transcript_events (
   session_id TEXT NOT NULL,

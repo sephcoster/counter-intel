@@ -47,6 +47,12 @@ at 65% and red at 85% so you can see what needs compacting before it bites.
 Clicking a card opens the full detail: your prompts separated out from the agentic tool
 churn, files touched, event history, and a copyable `claude --resume` or `codex resume` command.
 Search for `Codex` or `Claude Code` to filter by agent.
+Search for a PR as `4242`, `#4242`, or `PR #4242`. References in intermediate
+prompts and assistant messages are indexed before the activity snippets are truncated,
+including mentions without a GitHub URL. PR searches include all dates unless **Active**
+is selected. A full GitHub URL or `owner/repo#4242` restricts the search to that repository;
+bare numbers do not invent a repository link. Existing transcripts are automatically
+reindexed once when the parser version changes.
 
 ## How it works
 
@@ -82,11 +88,17 @@ Turn start, completion, and interruption events drive working/waiting status. A 
 approval waits are not reliably recorded, so they can still appear as working. Older rollouts
 without turn events fall back to process activity and file modification time.
 
-Running processes are matched to their open rollout files via `lsof`, then explicit resume
-IDs, with cwd matching as a fallback for standalone CLIs. This keeps Claude and Codex sessions
-in the same project separate. App-server threads are live only when their rollout file can be
-matched; they have no terminal jump button unless a TTY is available. Closed processes move to
-history even if their last transcript event says working.
+Running processes are matched to their open rollout files via `lsof` and explicit resume
+IDs. An exact terminal match takes priority over a shared daemon holding the same rollout.
+All exact matches are reserved before directory fallback is considered.
+
+Newer Codex terminal clients can display a thread whose rollout is held by the shared
+app-server daemon. When there is exactly one loaded top-level thread and one unmatched
+terminal client in a directory, the board links that terminal to the loaded thread instead
+of a historical transcript. This is a best-effort directory association, not an explicit
+client-to-thread identifier. Ambiguous directories keep their threads unlinked. Without a
+daemon match, directory fallback requires a single transcript and a single terminal client.
+Closed processes move to history even if their last transcript event says working.
 
 Local and worktree sessions from the Codex desktop app should be picked up when their
 rollouts are stored in the watched directory. One app-server process can match multiple
@@ -196,6 +208,10 @@ and drives iTerm2 via AppleScript with Terminal.app as a fallback.
 
 macOS may ask for Automation permission the first time. Sessions with no recorded TTY —
 background and daemon-spawned ones — don't show the button.
+The jump targets the owning terminal application when it can be identified. AppleScript
+timeouts are reported explicitly; a failed iTerm/Terminal tab lookup is not reported as a
+successful app-level jump. Duplicate clicks are disabled while a request is pending, and
+the UI reports a request timeout after 30 seconds.
 
 Terminals that ship no AppleScript dictionary can't be searched by tty at all — Alacritty,
 kitty, WezTerm and VS Code's integrated terminal are all invisible to the lookup above. For

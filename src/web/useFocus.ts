@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type FocusState = "idle" | "working" | "ok" | "failed";
 
@@ -20,6 +20,7 @@ const MESSAGES: Record<string, string> = {
   "tmux-other-session": "Nothing is showing this tmux session",
   "tmux-client-unreachable": "Could not raise the terminal showing this tmux session",
   error: "Could not talk to the terminal",
+  timeout: "The terminal took too long to respond. Check for a macOS Automation permission prompt, then try again.",
 };
 
 function describe(body: FocusBody): string {
@@ -32,14 +33,27 @@ export function useFocus() {
   const [state, setState] = useState<FocusState>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [attachCommand, setAttachCommand] = useState<string | null>(null);
+  const pending = useRef<AbortController | null>(null);
+  const resetTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => {
+    pending.current?.abort();
+    pending.current = null;
+    clearTimeout(resetTimer.current);
+  }, []);
 
   const post = useCallback(async (sessionId: string, action: "focus" | "tmux-attach") => {
+    if (pending.current) return;
+    clearTimeout(resetTimer.current);
+    const controller = new AbortController();
+    pending.current = controller;
+    const deadline = setTimeout(() => controller.abort(), 30_000);
     setState("working");
     setMessage(null);
     setAttachCommand(null);
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/${action}`, { method: "POST" });
+      const res = await fetch(`/api/sessions/${sessionId}/${action}`, { method: "POST", signal: controller.signal });
       const body = (await res.json()) as FocusBody;
+      if (pending.current !== controller) return;
       if (res.ok && body.ok) {
         setState("ok");
         if (body.via === "tmux-attach") {
@@ -47,18 +61,24 @@ export function useFocus() {
         } else if (body.via === "app") {
           setMessage(`Raised ${body.app} — it exposes no way to pick the window, so check the front one`);
         }
-        setTimeout(() => setState("idle"), 1200);
+        resetTimer.current = setTimeout(() => setState("idle"), 1200);
         return;
       }
       setState("failed");
       setMessage(describe(body));
       // Kept past the state reset so the command stays copyable while it's needed.
       setAttachCommand(body.attachCommand ?? null);
-      setTimeout(() => setState("idle"), 4000);
+      resetTimer.current = setTimeout(() => setState("idle"), 4000);
     } catch (err) {
+      if (pending.current !== controller) return;
       setState("failed");
-      setMessage(err instanceof Error ? err.message : String(err));
-      setTimeout(() => setState("idle"), 4000);
+      setMessage(controller.signal.aborted
+        ? "The jump request timed out. The server may still finish it; check the terminal before retrying."
+        : err instanceof Error ? err.message : String(err));
+      resetTimer.current = setTimeout(() => setState("idle"), 4000);
+    } finally {
+      clearTimeout(deadline);
+      if (pending.current === controller) pending.current = null;
     }
   }, []);
 
